@@ -1,187 +1,133 @@
-# 偷闲 · Touxian
+<p align="center">
+  <img src="desktop/attention-desk/public/touxian-icon.png" width="112" alt="偷闲应用图标">
+</p>
 
-把注意力留给重要的事。
+<h1 align="center">偷闲 · Touxian</h1>
 
-偷闲是一套面向校园通知和高频消息场景的本地优先注意力工具，提供桌面端工作台和 Android 手机端。它们共享产品方向，但保持独立的运行边界：
+<p align="center"><strong>把注意力留给重要的事。</strong></p>
+<p align="center">读懂通知，核对依据，记住期限，把“看到了”变成“处理完了”。</p>
+<p align="center">A local-first attention assistant for WeChat conversations and campus notices.</p>
 
-- **桌面端**：整理微信群导出记录和温州大学学院官网公告，形成带截止日期、优先级、证据和归档状态的行动队列。
-- **Android 端**：在用户主动打开的微信可见会话中识别事件、行动要求、日期和语境线索，提供悬浮窗、观测簿、完成归档和确认后写入日历。
+<p align="center">
+  <a href="https://github.com/sssssjw11/touxian/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/sssssjw11/touxian?style=social"></a>
+  <a href="https://github.com/sssssjw11/touxian/commits/main"><img alt="Latest commit" src="https://img.shields.io/github/last-commit/sssssjw11/touxian"></a>
+  <a href="https://github.com/sssssjw11/attention-guard/releases/tag/v1.22"><img alt="Android version" src="https://img.shields.io/badge/Android-1.22_preview-136B5A"></a>
+  <img alt="Android 11+" src="https://img.shields.io/badge/Android-11%2B-3DDC84?logo=android&logoColor=white">
+  <img alt="MIT License" src="https://img.shields.io/badge/license-MIT-315DA8">
+</p>
 
-这个仓库是**发布总仓库**，用于集中查看、构建和发布两个端的代码。平台源码仍保留在各自目录中，便于独立开发和独立发版。
+<p align="center">
+  <a href="#-快速开始">快速开始</a> ·
+  <a href="#-桌面端">桌面端</a> ·
+  <a href="#-android-端">Android 端</a> ·
+  <a href="#-功能地图">功能地图</a> ·
+  <a href="#-构建与测试">构建与测试</a> ·
+  <a href="https://github.com/sssssjw11/touxian/issues">反馈问题</a>
+</p>
 
-> 当前版本：桌面端同步自 `sssssjw11/wzu-notice-scraper@126b45e`；Android 端同步自 `sssssjw11/attention-guard@f258b5b`（Android 1.22 预览版，versionCode 23）。
+> [!IMPORTANT]
+> 这是一个**双端发布总仓库**：`desktop/` 是偷闲桌面端，`android/` 是偷闲 Android 端。两端共享产品方向，但各自独立运行、独立保存数据、独立发版。
 
-## 目录
+> [!WARNING]
+> 当前 Android 发布包是 **1.22 预览版 / versionCode 23 / debug 签名**；桌面端当前提供本地 Web 工作台，仓库暂未提供独立的 Windows `.exe` 安装包。重要期限和行动请始终回到原始消息核对。
 
-- [产品定位](#产品定位)
-- [平台能力](#平台能力)
-- [快速开始](#快速开始)
-- [桌面端](#桌面端)
-- [Android 端](#android-端)
-- [架构与数据边界](#架构与数据边界)
-- [版本与发布](#版本与发布)
-- [目录结构](#目录结构)
-- [测试与验收](#测试与验收)
-- [隐私与安全](#隐私与安全)
-- [贡献](#贡献)
-- [许可证与来源](#许可证与来源)
+---
 
-## 产品定位
+## 🌟 偷闲是什么？
 
-群聊和学院官网里的重要信息，通常分散在通知、补充说明、改期和催办之间。偷闲把这些信息整理成可以核对、处理和找回的事项：
+群聊和学院官网里，真正需要行动的信息往往不是一条消息就说完：
 
-**发现值得关注的消息 → 查看原始依据 → 确认行动和期限 → 完成或归档。**
+- 一条通知给出报名入口；
+- 下一条补充截止时间；
+- 后面又有人提醒材料格式；
+- 最后还可能临时改期。
 
-产品原则：
-
-- **效率优先**：减少复制、切换和重复确认。
-- **本地优先**：基础识别和数据保存默认在本机完成。
-- **证据可查**：结果保留来源、时间、原文依据和处理记录。
-- **边界清楚**：已读、已完成、超期归档和模型置信度不混成一个状态。
-- **用户掌控**：不自动回复、不代发消息、不后台遍历全部微信群、不未经确认写入日历。
-
-## 平台能力
-
-| 能力 | 桌面端 | Android 端 |
-| --- | --- | --- |
-| 微信 `messages.json` 导入 | 支持 | 不适用 |
-| 微信导出聊天记录 zip | 支持 | 不适用 |
-| 本机微信只读导出 | 支持 | 读取当前可见会话 |
-| 转发收件箱 | 支持 | 不适用 |
-| 温州大学学院官网监测 | 支持 | 不适用 |
-| 公告分类与发布日期 | 支持 | 不适用 |
-| 截止日期与超期归档 | 支持 | 支持事件期限 |
-| P0–P3 / 完成 / 归档 | 支持 | 支持事件完成和归档 |
-| 微信悬浮窗 | 不适用 | 支持 |
-| 意图和语境分析 | 可选 Jev / DeepSeek | 本地规则 |
-| 日历写入 | 邮件摘要 | 用户确认后写入 |
-
-桌面端和 Android 端不会互相读取对方的本地数据库，也没有总仓库级云端同步服务。需要同步时，应使用各端已有的导出、报告或系统账户能力。
-
-## 快速开始
-
-### 获取总仓库
-
-```bash
-git clone https://github.com/sssssjw11/touxian.git
-cd touxian
-```
-
-### 只运行桌面端
-
-Windows PowerShell：
-
-```powershell
-cd desktop\attention-desk
-.\start.ps1 -Install
-```
-
-打开 `http://127.0.0.1:5173`。后端 API 默认是 `http://127.0.0.1:8765`。
-
-### 只构建 Android 端
-
-```bash
-cd android
-./gradlew :app:assembleDebug
-```
-
-Windows PowerShell：
-
-```powershell
-cd android
-.\gradlew.bat :app:assembleDebug
-```
-
-APK 输出在：
+偷闲把这些分散的信息整理成一条可追踪的行动线：
 
 ```text
-android/app/build/outputs/apk/debug/app-debug.apk
+发现值得关注的消息
+        ↓
+识别事件、类别与期限
+        ↓
+保留原始依据和来源
+        ↓
+完成、归档、恢复或写入日历
 ```
 
-两个平台可以分别使用，不需要先启动另一端。
+它不是聊天备份工具，也不是替你做决定的黑盒模型。它更像一个安静的注意力工作台：帮你把信息摆整齐，把重要的事情留在眼前。
 
-## 桌面端
+## 🎯 适合谁？
 
-桌面端源码位于 [`desktop/`](desktop/)，核心应用位于 [`desktop/attention-desk/`](desktop/attention-desk/)。
+- 经常接收班级群、课程群、学院群通知的学生。
+- 需要跟踪报名、比赛、会议、作业和材料提交截止时间的人。
+- 想把多个学院官网公告集中查看的人。
+- 希望在手机微信里快速确认事件，又想在电脑上集中处理待办的人。
+- 重视本地数据、原文证据和可解释判断的使用者。
 
-### 能做什么
+## 🗺️ 功能地图
 
-- 导入 `messages.json`、微信聊天记录 zip 或转发收件箱。
-- 只读读取本机微信已安装导出器或已有解密 SQLite。
-- 选择消息日期范围和分析基准日。
-- 使用本地 Jev 基线、TypeSafe Jev、DeepSeek 或自定义 Jev API。
-- 按 P0–P3、待复核、今日截止、临近、宽裕和超期归档处理事项。
-- 监测 22 个温州大学学院公开来源。
-- 显示公告发布日期、比赛 / 活动、公示、其他公告分类。
-- 按需读取公开正文，提取活动 / 报名截止日期和证据。
-- 分开保存未读、已读完、已完成和超期状态。
-- 学院来源拖动排序、右键置顶。
-- 预览并确认发送 DDL 邮件摘要。
+| 能力 | 桌面端 | Android 端 |
+| --- | :---: | :---: |
+| `messages.json` 导入 | ✅ | — |
+| 微信聊天记录 zip 导入 | ✅ | — |
+| 微信转发收件箱 | ✅ | — |
+| 本机微信只读导出 | ✅ | 读取当前可见会话 |
+| 温州大学学院官网监测 | ✅ | — |
+| 公告分类与发布日期 | ✅ | — |
+| 活动 / 报名截止日期提取 | ✅ | — |
+| 超期归档与完成状态 | ✅ | ✅ |
+| P0–P3 优先级 | ✅ | ✅ |
+| 微信悬浮窗 | — | ✅ |
+| 意图与语境分析 | Jev / DeepSeek 可选 | 本地规则 |
+| 自由文本分析 | — | ✅ |
+| 确认后写入日历 | 邮件摘要 | ✅ |
+| 学院来源拖动排序 / 置顶 | ✅ | — |
 
-### 开发模式
+## ✨ 功能特性
 
-```powershell
-cd desktop\attention-desk
-.\start.ps1 -Install
-```
+### 🖥️ 桌面端：Attention Desk
 
-端口冲突时：
+把微信导出记录和公开官网公告放进同一张可操作的桌面工作台：
 
-```powershell
-.\start.ps1 -WebPort 5174 -ApiPort 8865
-```
+- 📥 **四种导入方式**：`messages.json`、微信聊天记录 zip、本机微信、转发收件箱。
+- 🧭 **日期范围筛选**：开始日期和结束日期均可单独填写，闭区间处理。
+- ⏰ **截止状态动态判断**：超期、今日截止、临近、宽裕、未排期。
+- 🧩 **P0–P3 行动队列**：重要性和紧迫性分开计算，保留待复核路径。
+- ✅ **完成并归档**：处理完一键移出进行中，之后仍可搜索和撤销。
+- 🏫 **温州大学学院监测**：串行检查 22 个公开学院来源，保留部分可用和需认证状态。
+- 🗂️ **公告分类**：比赛 / 活动通知、公示、其他公告、待确认。
+- 📅 **双日期展示**：列表显示公告发布日期，详情按需识别活动 / 报名截止日期。
+- 👁️ **已读与完成分离**：已读、已读完、已完成、超期归档各自有明确语义。
+- 📌 **来源整理**：学院列表支持拖动排序，右键可以置顶或取消置顶。
+- ✉️ **DDL 邮件摘要**：支持 HTML / 纯文本预览，发送前二次确认。
+- 🔌 **API 可选**：本地 Jev、TypeSafe Jev、DeepSeek、自定义 Jev API。
 
-Linux / macOS：
+### 📱 Android 端：偷闲
 
-```bash
-cd desktop/attention-desk
-python3 -m venv ../.venv
-../.venv/bin/python -m pip install -r server/requirements.txt
-npm ci
-```
+在微信当前可见会话中，快速识别值得留意的事件：
 
-终端一启动 API：
+- 👀 **当前屏幕观测**：只读取用户主动打开的、当前可见的微信内容。
+- 🪟 **三级悬浮窗**：完整面板、紧凑工具条、小球，随时收起。
+- 🧠 **事件监测**：识别事件类型、行动要求、重要性、期限和原始依据。
+- 💬 **意图分析**：结合当前可见语境展示可能意图、情绪线索和置信度。
+- 📝 **自由文本分析**：粘贴一段对话即可分析，不写入事件簿。
+- 📓 **事件观测簿**：搜索、完成、归档、恢复，保留事件更新记录。
+- 🗓️ **确认后写日历**：预览标题、时间、提醒和目标日历，确认后才写入。
+- 🔎 **有界历史回溯**：用户主动启动，受会话、翻页、时间和次数限制。
+- 🛠️ **运行诊断**：查看可读消息数、采集连接、悬浮窗和保活状态。
+- 🌐 **可选联网增强**：DeepSeek 事件增强默认关闭，本地规则可独立工作。
 
-```bash
-../.venv/bin/python -m uvicorn server.main:app --host 127.0.0.1 --port 8765
-```
+## 🚀 快速开始
 
-终端二启动前端：
+### 方式一：直接使用 Android 预览版
 
-```bash
-ATTENTION_API_PORT=8765 npm run dev -- --host 127.0.0.1 --port 5173
-```
+系统要求：Android 11 / API 30 及以上。
 
-### 本地生产模式
-
-```bash
-cd desktop/attention-desk
-npm ci
-npm run build
-../.venv/bin/python -m uvicorn server.main:app --host 127.0.0.1 --port 8765
-```
-
-打开 `http://127.0.0.1:8765`。FastAPI 会直接提供 `dist/` 中的页面和 `/api/*` 接口。
-
-### 桌面端文档
-
-- [桌面端使用和部署手册](desktop/attention-desk/README.md)
-- [产品需求与体验重构记录](desktop/attention-desk/PRODUCT_REQUIREMENTS.md)
-- [版本改进记录](desktop/attention-desk/VERSION_NOTES.md)
-
-## Android 端
-
-Android 端源码位于 [`android/`](android/)，是 Kotlin 原生 Android 应用，当前版本为 1.22 预览版。
-
-### 安装发布 APK
-
-正式下载、SHA-256 和发布说明以 Android 子仓库的 Release 为准：
-
-- [Android Releases](https://github.com/sssssjw11/attention-guard/releases)
-- [1.22 预览版](https://github.com/sssssjw11/attention-guard/releases/tag/v1.22)
-- [当前 APK 下载](https://github.com/sssssjw11/attention-guard/releases/download/v1.22/touxian-1.22-debug.apk)
-
-系统要求：Android 11 / API 30 及以上。当前发布包使用 debug 签名，不能和其他签名的同包名应用直接覆盖。
+| 下载项 | 地址 |
+| --- | --- |
+| Android APK · 1.22 预览版 | [touxian-1.22-debug.apk](https://github.com/sssssjw11/attention-guard/releases/download/v1.22/touxian-1.22-debug.apk) |
+| SHA-256 校验文件 | [touxian-1.22-debug.apk.sha256](https://github.com/sssssjw11/attention-guard/releases/download/v1.22/touxian-1.22-debug.apk.sha256) |
+| 发布页 | [Android v1.22](https://github.com/sssssjw11/attention-guard/releases/tag/v1.22) |
 
 ADB 安装：
 
@@ -189,26 +135,23 @@ ADB 安装：
 adb install -r touxian-1.22-debug.apk
 ```
 
-### Android 端功能
+> 当前 APK 使用 debug 签名。遇到“签名不一致”时不要直接卸载旧应用，先确认本地事件、消息、密钥和设置的保留方案。
 
-- 微信当前可见文字会话的事件监测。
-- 微信悬浮窗、紧凑工具条和小球三级显示。
-- 事件类型、行动要求、期限、重要性和原始依据。
-- 微信意图 / 语境分析和自由文本分析。
-- 观测簿搜索、完成、归档和恢复。
-- 用户确认后写入系统日历，默认提醒方式为开始时。
-- 主动启动的有界历史回溯。
-- 本机 OCR 和运行诊断。
-- 可选 DeepSeek 事件增强，默认关闭。
+### 方式二：启动桌面端
 
-### Android 端构建
+Windows PowerShell：
 
-环境要求：
+```powershell
+git clone https://github.com/sssssjw11/touxian.git
+cd touxian\desktop\attention-desk
+.\start.ps1 -Install
+```
 
-- JDK 17。
-- Android SDK Platform 35。
-- Build Tools 35.0.0。
-- 使用仓库 Gradle Wrapper，Gradle 8.9。
+打开 `http://127.0.0.1:5173`。
+
+后端 API 默认运行在 `http://127.0.0.1:8765`。首次启动可以直接使用仓库内的合成演示数据，不会自动读取你的微信内容。
+
+### 方式三：从源码构建 Android
 
 ```bash
 cd android
@@ -224,95 +167,168 @@ cd android
 .\gradlew.bat :app:testDebugUnitTest
 ```
 
-Release 签名配置必须放在仓库外，并通过 `ATTENTION_GUARD_KEYSTORE_PROPS` 指定；不要提交密钥库、密码或 `local.properties`。
-
-### Android 端文档
-
-- [Android 端完整说明](android/README.md)
-- [设计文档](android/DESIGN.md)
-- [交互约定](android/UX-CONTRACT.md)
-- [1.22 发布说明](android/docs/releases/v1.22.md)
-- [真机验收记录](android/docs/device-acceptance-1.22.md)
-
-## 架构与数据边界
-
-```mermaid
-flowchart LR
-    subgraph Desktop[桌面端]
-        W1[微信 JSON / zip / 转发收件箱] --> P1[本地解析]
-        W2[学院官网公开列表] --> P2[串行扫描]
-        P1 --> R1[Jev 窄问题 + 本地 reducer]
-        P2 --> R2[分类 / 日期 / 已读状态]
-        R1 --> D1[行动队列]
-        R2 --> D1
-    end
-    subgraph Android[Android 端]
-        A1[当前可见微信会话] --> A2[无障碍节点读取]
-        A2 --> A3[本地事件规则]
-        A3 --> A4[观测簿 / 日历预览]
-    end
-```
-
-### 桌面端边界
-
-- 本地 Jev 模式不上传聊天内容。
-- 只有用户选择远程判断时，候选消息片段和可选画像才发送到填写的 API。
-- API key 只用于当前请求，不写入仓库。
-- 官网只访问公开温州大学域名，不绕过认证或验证码。
-- 转发收件箱按内容哈希去重，原始 zip 只读复制。
-
-### Android 端边界
-
-- 只处理用户主动打开、当前可见的微信内容。
-- 不读取微信数据库，不 hook 微信，不自动发送消息、转账或红包。
-- 意图分析和自由文本分析不写入事件簿。
-- DeepSeek 增强默认关闭，开启后只发送符合条件的事件上下文。
-- 日历只有在用户确认后才写入。
-
-## 版本与发布
-
-总仓库发布不替代两个子项目的独立版本：
-
-| 端 | 来源仓库 | 当前同步提交 / 版本 | 构建产物 |
-| --- | --- | --- | --- |
-| Desktop | [wzu-notice-scraper](https://github.com/sssssjw11/wzu-notice-scraper) | `126b45e` | 本地 Web / FastAPI |
-| Android | [attention-guard](https://github.com/sssssjw11/attention-guard) | `f258b5b` / 1.22 | Debug APK |
-
-同步流程：
-
-1. 先在原始仓库完成代码和测试。
-2. 在本仓库对应目录更新快照。
-3. 更新本 README 的同步提交和版本号。
-4. 分别运行桌面端和 Android 端的构建 / 回归。
-5. 为总仓库打发布标签，并在两个来源仓库保留可追溯链接。
-
-总仓库目前不承诺自动同步。两个来源仓库的新提交不会自动出现在这里，必须经过一次人工同步和验证。
-
-## 目录结构
+APK 输出：
 
 ```text
-touxian/
-├── README.md
-├── desktop/                         # 温州大学通知抓取器 + Attention Desk
-│   ├── attention-desk/              # React + FastAPI 桌面工作台
-│   ├── .agents/                     # 公告分拣技能和 JEV 规则
-│   ├── data/                        # 版本化站点目录和演示数据
-│   ├── scrape.py                    # 官网通知列表抓取
-│   ├── download.py                  # 正文、图片和附件下载
-│   └── ...
-└── android/                         # Kotlin Android 应用
-    ├── app/
-    ├── docs/
-    ├── scripts/
-    └── ...
+android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-运行时数据、构建产物和私人记录不应进入总仓库：
+## 🖥️ 桌面端使用教程
 
-- 桌面端：`desktop/data/attention-desk/`、`desktop/data/contacts/`、`desktop/out/`、`desktop/download/`、`desktop/attention-desk/node_modules/`。
-- Android：`android/.gradle/`、`android/local.properties`、`android/app/build/`、签名文件和密钥配置。
+桌面端源码位于 [`desktop/`](desktop/)，工作台位于 [`desktop/attention-desk/`](desktop/attention-desk/)。
 
-## 测试与验收
+### 1. 选择消息来源
+
+设置面板支持四条互相独立的入口：
+
+| 入口 | 你需要准备什么 | 适用场景 |
+| --- | --- | --- |
+| 📄 导入文件 | `messages.json` | 已经有标准消息包 |
+| 🗜️ 聊天记录包 | 微信导出的 `.zip` | 最简单、最推荐的手动导入 |
+| 🧰 本机微信 | 已安装导出器或兼容 SQLite | 直接搜索和读取指定群 |
+| 📬 转发收件箱 | 转发给 WorkBuddy 的 zip | 不想反复手动选择文件 |
+
+### 2. 分拣微信群通知
+
+1. 打开设置并选择数据来源。
+2. 选择群聊、上传 JSON 或选择聊天记录 zip。
+3. 设置消息日期范围。
+4. 设置分析基准日。
+5. 选择判断提供方：
+   - 🧮 **本地 Jev 基线**：默认推荐，不上传聊天内容。
+   - ✨ **TypeSafe Jev**：填写自己的 API Key。
+   - 🧠 **DeepSeek**：填写 API Key，可使用官方兼容接口。
+   - 🧩 **自定义 Jev API**：填写兼容 `state + questions` 的 Endpoint。
+6. 点击“开始分拣”。
+7. 在进行中查看 P0–P3、截止状态、证据和待复核项。
+8. 处理完成后勾选“完成并归档”。
+
+最终截止日和优先级由本地逻辑决定。远程模型只回答窄问题，不能直接把一条普通聊天改成高优先级待办。
+
+### 3. 监测学院官网
+
+1. 点击左侧地球图标进入“公开来源：温州大学 · 学院官网”。
+2. 首次使用点击“检查全部”，或选择指定学院。
+3. 按学院、日期、关键词、分类和“全部 / 未读 / 已读完”筛选。
+4. 列表显示公告发布日期。
+5. 打开详情后按需读取公开正文。
+6. 有可靠正文证据时显示活动 / 报名截止日期。
+7. 可单独标记已读、完成或撤销完成。
+
+认证墙、非温大域名跳转、正文失败和空结果都会显示原因，不会被静默当成“没有公告”。
+
+### 4. 转发收件箱
+
+将微信聊天记录导出为 zip 后转发给 WorkBuddy。工作台会扫描：
+
+```text
+~/.workbuddy/app/tmp/chat-history/
+```
+
+换机器或目录不同，可以覆盖：
+
+```powershell
+$env:ATTENTION_INBOX_WATCH_DIR = "D:\path\to\chat-history"
+$env:ATTENTION_INBOX_POLL = "10"
+```
+
+工作台会等待文件稳定、校验 zip、按内容哈希去重，再复制到：
+
+```text
+data/attention-desk/inbox/
+```
+
+### 5. 邮件摘要
+
+右上角“邮件摘要”会生成待办预览：
+
+- HTML 卡片式正文。
+- 纯文本正文。
+- 逾期事项单独置顶。
+- 每项保留截止时间、摘要和一条证据摘录。
+- 收件人保存在浏览器本地。
+- 第二次确认后才真正发送。
+
+## 📱 Android 使用教程
+
+Android 端完整说明在 [`android/README.md`](android/README.md)，这里给出最短路径：
+
+1. 安装 APK。
+2. 在“我的”里打开示例模式，先熟悉界面。
+3. 为偷闲开启无障碍服务和必要的悬浮窗能力。
+4. 在“规则与外观”设置会话识别词条，或在微信内手动标记当前会话。
+5. 打开自己有权查看的微信文字聊天。
+6. 选择“事件监测”或“意图分析”。
+7. 在观测簿核对原文依据，再完成、归档或加入日历。
+
+### 三种模式
+
+| 模式 | 读取什么 | 会保存什么 |
+| --- | --- | --- |
+| 🎯 事件监测 | 当前可见微信会话 | 消息和符合条件的事件 |
+| 💬 意图分析 | 当前屏幕可读语境 | 展示结果，不生成事件 |
+| 📝 自由文本分析 | 你主动输入或粘贴的文字 | 展示结果，不写入事件簿 |
+
+> 识别词条为空表示不按会话名称限制范围，不等于自动遍历全部会话。历史回溯必须由用户主动启动，并受速度、屏数和时间上限约束。
+
+## 🧠 判断与架构
+
+### 桌面端 JEV 边界
+
+桌面端采用 JEV 风格的类型化判断：
+
+```text
+共享消息状态
+      ↓
+候选聚类与日期解析
+      ↓
+Boolean / Choice / Score 窄问题
+      ↓
+本地确定性 reducer
+      ↓
+P0–P3、截止状态、证据和归档
+```
+
+- 日期和截止状态由本地解析器决定。
+- 低置信度结果进入待复核或回退路径。
+- 非法枚举和远程 `urgency` 覆盖会被拒绝。
+- 最终优先级不会由一段自由文本直接改写。
+
+### Android 端采集边界
+
+```text
+当前可见微信节点
+      ↓
+会话范围校验
+      ↓
+本地事件规则 / 语境分析
+      ↓
+观测簿 / 日历预览
+      ↓
+用户确认后写入
+```
+
+Android 端不读取微信数据库、不 hook 微信、不自动发送消息，也不把意图模式内容写进事件簿。
+
+## 🧱 技术栈
+
+### Desktop
+
+- React 18 + Vite。
+- FastAPI + Uvicorn。
+- Python `requests` / `httpx` / BeautifulSoup / lxml。
+- 本地 JEV 风格公告分拣技能。
+- Lucide 风格线性图标和桌面优先布局。
+
+### Android
+
+- Kotlin。
+- Android 原生 View + Material Components。
+- ML Kit 中文 OCR。
+- JUnit + Robolectric。
+- Gradle Wrapper。
+
+## 🧪 构建与测试
 
 ### 桌面端
 
@@ -324,6 +340,8 @@ npm ci
 npm run build
 ```
 
+当前桌面端回归结果：**252 项测试通过，前端生产构建通过**。
+
 ### Android 端
 
 ```bash
@@ -332,46 +350,141 @@ cd android
 ./gradlew :app:assembleDebug
 ```
 
-需要真机时，再按 Android 子仓库中的验收记录安装 APK；模拟器结果不能替代无障碍、悬浮窗和微信版本的真机覆盖。
+Android 原仓库保留了版本化测试记录和真机验收记录：
 
-本次总仓库同步时，桌面端回归和构建已在当前环境通过；Android Gradle 任务因当前机器未配置 Android SDK 未重跑。Android 的历史测试与真机范围以 [`android/README.md`](android/README.md) 和 [`android/docs/device-acceptance-1.22.md`](android/docs/device-acceptance-1.22.md) 为准。
+- [1.22 迭代说明](android/docs/iteration-1.22.md)
+- [1.22 发布说明](android/docs/releases/v1.22.md)
+- [真机验收](android/docs/device-acceptance-1.22.md)
 
-## 隐私与安全
+如果当前机器没有 Android SDK，Gradle 会在配置阶段停止；这属于本机构建环境问题，不代表源码测试失败。
 
-- 只处理自己有权查看的聊天和公开官网内容。
-- 不提交真实聊天记录、截图、数据库、API key、令牌、证书或签名文件。
-- 远程模型调用前确认服务商的数据处理、费用和留存政策。
-- 重要期限、行动和人际判断始终以原始消息和用户确认作为最终依据。
-- 若公开发布构建产物，请同时提供版本号、签名类型、校验值和已知限制。
+## 🔐 权限、隐私与安全
 
-## 贡献
+### Desktop
 
-欢迎提交：
+- 本地模式不上传聊天内容。
+- 远程提供方只在用户主动选择后接收候选消息片段和可选画像。
+- API Key 只在当前请求中使用，不写入仓库。
+- 学院官网只读取公开温州大学域名，不绕过认证或验证码。
+- 运行时聊天数据、报告、下载附件和状态文件被 Git 忽略。
 
-- 桌面端来源解析和状态逻辑修复。
-- Android 端设备兼容性、无障碍读取和交互改进。
-- 去标识的回归样例和可复现测试。
-- 文档、构建和发布流程改进。
+### Android
+
+- 无障碍服务只用于读取前台微信可见节点和显示应用悬浮窗。
+- 不后台遍历全部微信群，不自动回复，不执行转账、红包或发送操作。
+- OCR 截图只在内存中处理。
+- DeepSeek 联网增强默认关闭。
+- 日历事件只有在用户点击确认后才写入。
+
+请只处理自己有权查看的内容，并遵守微信、Android 和目标网站的适用规则。
+
+## 🗂️ 仓库结构
+
+```text
+touxian/
+├── README.md
+├── RELEASE.md
+├── desktop/
+│   ├── attention-desk/       # React + FastAPI 工作台
+│   ├── .agents/              # 公告分拣技能与 JEV 规则
+│   ├── data/                 # 版本化站点目录和合成演示数据
+│   ├── scrape.py             # 温大官网通知列表抓取
+│   ├── download.py           # 正文、图片和附件下载
+│   └── ...
+└── android/
+    ├── app/                  # Android 应用模块
+    ├── docs/                 # 发布、设计、真机记录
+    ├── scripts/              # APK 检查和设备规则验证
+    └── ...
+```
+
+运行时数据和构建产物不进入发布仓库：
+
+- Desktop：`desktop/data/attention-desk/`、`desktop/data/contacts/`、`desktop/out/`、`desktop/download/`、`desktop/attention-desk/node_modules/`
+- Android：`android/.gradle/`、`android/local.properties`、`android/app/build/`、签名文件和密钥配置
+
+## 🛣️ 路线图
+
+- [x] 桌面端微信群导入、日期范围、Jev / DeepSeek 可选判断。
+- [x] 学院官网监测、公告分类、发布日期和按需截止日期。
+- [x] 已读完、完成归档、超期归档和学院来源置顶。
+- [x] Android 微信可见会话事件监测和三级悬浮窗。
+- [x] Android 观测簿、组合检索、日历确认写入和本地 OCR。
+- [ ] 总仓库自动同步两个来源仓库。
+- [ ] 桌面端打包独立 Windows 安装包。
+- [ ] Android 扩大机型、微信版本和后台保活验收范围。
+- [ ] 设计跨端导出 / 导入协议，保持本地优先。
+- [ ] 建立去标识样本集，持续校准规则和低置信度路径。
+
+路线图是方向清单，不是时间承诺；平台边界和隐私约束优先级更高。
+
+## 🤝 贡献
+
+欢迎提交 Issue、可复现样例、文档改进和小范围补丁：
+
+1. 桌面端来源解析、日期识别、状态逻辑和布局问题。
+2. Android 端机型兼容、无障碍读取、悬浮窗和交互问题。
+3. 去标识的回归样例与测试。
+4. 构建、发布和 README 改进。
 
 提交前请确认：
 
-1. 修改只放在对应平台目录，避免把桌面端和 Android 端的运行时依赖混在一起。
-2. 不绕过认证、验证码、系统权限或第三方平台访问控制。
-3. JEV / 本地规则变化有对应测试和证据说明。
-4. 设备日志、截图和样例已经去除姓名、群名、号码、邮箱和密钥。
+- 不提交完整聊天导出、数据库、截图、API Key、令牌、证书或签名文件。
+- 不绕过认证、验证码、系统权限或第三方平台访问控制。
+- 修改 JEV / 本地规则时附带测试和证据说明。
+- 设备日志和样例已经移除姓名、群名、号码、邮箱和本地路径。
 
-## 许可证与来源
+## 📦 版本与来源
 
-本总仓库由两个独立项目组成：
+| 平台 | 来源仓库 | 当前同步版本 | 主要产物 |
+| --- | --- | --- | --- |
+| Desktop | [wzu-notice-scraper](https://github.com/sssssjw11/wzu-notice-scraper) | `126b45e` | 本地 Web / FastAPI |
+| Android | [attention-guard](https://github.com/sssssjw11/attention-guard) | `f258b5b` / `1.22` | Debug APK |
 
-- 桌面端代码和原始温大抓取器：见 [`desktop/LICENSE`](desktop/LICENSE)。
-- Android 端代码：见 [`android/LICENSE`](android/LICENSE)。
-- 两个项目均采用 MIT License，但版权声明和贡献来源分别保留。
+总仓库是发布聚合仓库，不自动跟踪来源仓库。更新流程：
 
-来源仓库：
+```text
+来源仓库完成开发与测试
+          ↓
+同步到 desktop/ 或 android/
+          ↓
+更新 README / RELEASE.md
+          ↓
+运行对应平台回归
+          ↓
+推送总仓库并打发布标签
+```
 
-- [sssssjw11/wzu-notice-scraper](https://github.com/sssssjw11/wzu-notice-scraper)
-- [sssssjw11/attention-guard](https://github.com/sssssjw11/attention-guard)
-- 桌面端合作与贡献说明：[`desktop/CREDITS.md`](desktop/CREDITS.md)
+## 📚 文档索引
+
+### Desktop
+
+- [桌面端总说明](desktop/README.md)
+- [Attention Desk 使用手册](desktop/attention-desk/README.md)
+- [产品需求与体验计划](desktop/attention-desk/PRODUCT_REQUIREMENTS.md)
+- [版本改进记录](desktop/attention-desk/VERSION_NOTES.md)
+- [合作与贡献](desktop/CREDITS.md)
+
+### Android
+
+- [Android 端完整说明](android/README.md)
+- [设计系统](android/DESIGN.md)
+- [交互约定](android/UX-CONTRACT.md)
+- [1.22 发布说明](android/docs/releases/v1.22.md)
+- [真机验收记录](android/docs/device-acceptance-1.22.md)
+
+## ⚖️ 许可证与致谢
+
+本总仓库和两个平台代码均采用 MIT License；平台目录保留各自的版权和许可文件：
+
+- [`desktop/LICENSE`](desktop/LICENSE)
+- [`android/LICENSE`](android/LICENSE)
+- [`LICENSE`](LICENSE)
+
+感谢原始温州大学通知抓取器和 Android 偷闲项目的贡献者。合作与模块范围见 [`desktop/CREDITS.md`](desktop/CREDITS.md)。
 
 偷闲是独立项目，不隶属于微信、腾讯、DeepSeek、温州大学或任何参考项目。
+
+<p align="center">
+  <strong>如果偷闲帮你少漏掉一次截止时间，欢迎给仓库点一个 Star。</strong>
+</p>
