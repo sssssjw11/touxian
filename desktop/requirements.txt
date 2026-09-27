@@ -1,0 +1,16 @@
+# 温州大学通知抓取工具 —— 运行依赖
+#
+# 安装：
+#     python -m pip install -r requirements.txt
+#
+# 仅这三个第三方库，其余全部使用 Python 标准库（3.9+）。
+
+requests>=2.28          # HTTP 会话、Cookie 维持、请求头控制
+beautifulsoup4>=4.11    # HTML 解析（正文容器、页脚分组的定位）
+lxml>=4.9               # bs4 的解析引擎
+
+# 注意：lxml 是 BeautifulSoup(html, "lxml") 的解析后端，
+# 不是可选项 —— 代码里所有 BeautifulSoup 调用都显式指定了 "lxml"。
+# 漏装会报 FeatureNotFound: Couldn't find a tree builder。
+#
+# Windows 上 lxml 是预编译 wheel，pip 可直接安装，无需编译工具链。

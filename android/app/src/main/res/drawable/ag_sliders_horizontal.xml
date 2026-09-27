@@ -1,0 +1,11 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="@android:color/transparent" android:strokeColor="@color/ag_ink" android:strokeWidth="1.8" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M21,4 L14,4" />
+    <path android:fillColor="@android:color/transparent" android:strokeColor="@color/ag_ink" android:strokeWidth="1.8" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M10,4 L3,4" />
+    <path android:fillColor="@android:color/transparent" android:strokeColor="@color/ag_ink" android:strokeWidth="1.8" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M21,12 L12,12" />
+    <path android:fillColor="@android:color/transparent" android:strokeColor="@color/ag_ink" android:strokeWidth="1.8" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M8,12 L3,12" />
+    <path android:fillColor="@android:color/transparent" android:strokeColor="@color/ag_ink" android:strokeWidth="1.8" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M21,20 L16,20" />
+    <path android:fillColor="@android:color/transparent" android:strokeColor="@color/ag_ink" android:strokeWidth="1.8" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M12,20 L3,20" />
+    <path android:fillColor="@android:color/transparent" android:strokeColor="@color/ag_ink" android:strokeWidth="1.8" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M14,2 L14,6" />
+    <path android:fillColor="@android:color/transparent" android:strokeColor="@color/ag_ink" android:strokeWidth="1.8" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M8,10 L8,14" />
+    <path android:fillColor="@android:color/transparent" android:strokeColor="@color/ag_ink" android:strokeWidth="1.8" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M16,18 L16,22" />
+</vector>

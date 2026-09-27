@@ -1,0 +1,45 @@
+# Build
+/build/
+/app/build/
+.gradle/
+*.apk
+*.ap_
+*.dex
+*.class
+local.properties
+
+# Machine-specific
+env.ps1
+gradle.properties.local
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Dev artifacts / reports (not part of the product)
+/_reports/
+/.tmp/
+/tools/report/
+/tools/__pycache__/
+**/__pycache__/
+*.pyc
+hs_err_pid*.log
+replay_pid*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Never commit secrets
+*.key
+secrets.*
+
+# Prebuilt APK for direct install (tracked on purpose)
+!/apk/*.apk
+
+# Signing material never enters the repo
+*.jks
+*.keystore
+keystore.properties
+attention-guard-release.properties

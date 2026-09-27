@@ -1,0 +1,29 @@
+{
+  "profile": "product-admin",
+  "runtime": "android-native-view",
+  "sourceRoots": ["app/src/main/java", "app/src/main/res"],
+  "canonicalMap": "UX-CONTRACT.md",
+  "requiredCapabilities": ["Form", "Toast", "CRUD", "Date"],
+  "ownership": {
+    "Form": "GuardUi + SettingsActivity + CaptureActivity",
+    "Toast": "GuardUi.feedback + AttentionOverlayController",
+    "CRUD": "EventStore + MessageArchive + MainActivity + CaptureActivity",
+    "Table Selection": "not_applicable",
+    "Select/Listbox": "not_applicable",
+    "Date": "native"
+  },
+  "nonApplicableCapabilities": ["Table Selection", "Select/Listbox", "Browser E2E", "CSS scrollbar"],
+  "requiredCommands": ["unit", "build", "lint", "premium", "apkMetadata"],
+  "commands": {
+    "unit": "gradlew.bat :app:testDebugUnitTest --no-daemon --max-workers=1 --console=plain",
+    "build": "gradlew.bat :app:assembleDebug --no-daemon --max-workers=1 --console=plain",
+    "lint": "gradlew.bat :app:lintDebug --no-daemon --max-workers=1 --console=plain",
+    "premium": "python C:/Users/11381/.codex/plugins/cache/openai-curated-remote/frontend-design-premium/1.4.0/skills/frontend-design-premium/scripts/audit_project.py . --mode strict",
+    "apkMetadata": "aapt.exe dump badging app/build/outputs/apk/debug/app-debug.apk"
+  },
+  "evidence": {
+    "crudFullFlow": "docs/acceptance.md",
+    "failurePaths": "docs/acceptance.md"
+  },
+  "verificationNotes": "Static audit is contract evidence only. No browser claims are made for this Android-native project; real-device evidence remains explicitly pending."
+}

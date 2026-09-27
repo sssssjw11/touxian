@@ -1,0 +1,4 @@
+interface:
+  display_name: "Attention 公告分拣"
+  short_description: "从班级群和学院群消息中提取公告，判断优先级、DDL和行动项"
+  default_prompt: "读取微信群聊记录，按 JEV 风格并行判断公告类别、重要性、优先级、DDL和行动项，生成可执行清单。"

@@ -1,0 +1,42 @@
+# Desktop runtime and generated data
+desktop/.venv/
+desktop/venv/
+desktop/attention-desk/.venv/
+desktop/attention-desk/node_modules/
+desktop/attention-desk/dist/
+desktop/attention-desk/output/
+desktop/data/attention-desk/
+desktop/data/contacts/
+desktop/data/raw/
+desktop/vendor/
+desktop/reports/
+desktop/out/
+desktop/cache/
+desktop/probe/
+desktop/download/
+desktop/sites.json
+desktop/*.log
+desktop/*.db
+desktop/.env
+desktop/.env.*
+
+# Android build and local machine configuration
+android/.gradle/
+android/.idea/
+android/local.properties
+android/build/
+android/app/build/
+android/**/build/
+android/*.jks
+android/*.keystore
+android/*-release.properties
+android/.env
+android/.env.*
+
+# General local files
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~

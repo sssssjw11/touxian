@@ -1,0 +1,17 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Theme.AttentionGuard" parent="Theme.MaterialComponents.Light.NoActionBar">
+        <item name="colorPrimary">@color/ag_brand</item>
+        <item name="colorPrimaryVariant">@color/ag_brand</item>
+        <item name="colorOnPrimary">@color/ag_surface</item>
+        <item name="colorSecondary">@color/ag_brand</item>
+        <item name="colorSurface">@color/ag_surface</item>
+        <item name="colorOnSurface">@color/ag_ink</item>
+        <item name="colorError">@color/ag_danger</item>
+        <item name="android:colorAccent">@color/ag_brand</item>
+        <item name="android:windowBackground">@color/ag_background</item>
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:forceDarkAllowed">false</item>
+    </style>
+</resources>

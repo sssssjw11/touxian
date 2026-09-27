@@ -1,0 +1,83 @@
+# ---------------------------------------------------------------
+# 抓取产物：体积大、可重新生成，不入库
+# ---------------------------------------------------------------
+
+# 图文离线库（本项目实测：近一月 267 MB / 1962 个文件）
+# 目录由 _common.py 导入时自动创建，不需要 .gitkeep 占位
+download/
+
+# 打包交付物
+*.zip
+
+# ---------------------------------------------------------------
+# 抓取中间结果
+# ---------------------------------------------------------------
+
+# 各站点抓取明细 + 汇总 CSV + 报告
+out/
+
+# 首页与列表页 HTML 留档（用于复现与调试）
+cache/
+probe/
+
+# 首次运行抓取的官网首页留档（仅仓库根目录那一份；工作台的入口页必须入库）
+/index.html
+
+# 运行时生成的站点清单（版本化的事实数据在 data/sites.json）
+sites.json
+
+# 运行日志
+*.log
+_download.log
+_stdout.log
+
+# ---------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+ENV/
+
+# 测试与覆盖率
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ---------------------------------------------------------------
+# 编辑器 / 操作系统
+# ---------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Attention Desk local/private state and frontend output
+data/contacts/
+data/attention-desk/
+data/raw/
+vendor/
+reports/
+attention-desk/node_modules/
+attention-desk/dist/
+attention-desk/output/
+.env
+.env.*
+*.db
+
+# 开发过程截图产物（不入库）
+data/*.png

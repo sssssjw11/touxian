@@ -1,0 +1,34 @@
+<resources>
+    <color name="ag_background">#F3F5F2</color>
+    <color name="ag_surface">#FFFFFF</color>
+    <color name="ag_ink">#1D2927</color>
+    <color name="ag_secondary">#586963</color>
+    <color name="ag_border">#DCE3E0</color>
+    <color name="ag_brand">#136B5A</color>
+    <color name="ag_brand_soft">#E8F2ED</color>
+    <color name="ag_danger">#B53F36</color>
+    <color name="ag_danger_soft">#FCEDEA</color>
+    <color name="ag_warning">#865E15</color>
+    <color name="ag_warning_soft">#FFF3D9</color>
+    <color name="ag_info">#315DA8</color>
+    <color name="ag_info_soft">#EDF2FB</color>
+    <color name="ag_focus">#315DA8</color>
+    <color name="ag_ripple">#24136B5A</color>
+    <color name="ag_graphite">#151615</color>
+    <color name="ag_mint">#63D7C8</color>
+    <color name="ag_peach">#F4AC91</color>
+    <dimen name="ag_page_gutter">20dp</dimen>
+    <dimen name="ag_content_max">680dp</dimen>
+    <dimen name="ag_radius">8dp</dimen>
+    <dimen name="ag_touch">48dp</dimen>
+    <dimen name="ag_type_display">40sp</dimen>
+    <dimen name="ag_type_title">26sp</dimen>
+    <dimen name="ag_type_heading">18sp</dimen>
+    <dimen name="ag_type_body">15sp</dimen>
+    <dimen name="ag_type_label">13sp</dimen>
+    <dimen name="ag_type_caption">12sp</dimen>
+    <dimen name="ag_overlay_heading">16sp</dimen>
+    <dimen name="ag_overlay_body">14sp</dimen>
+    <dimen name="ag_overlay_label">12sp</dimen>
+    <dimen name="ag_overlay_caption">11sp</dimen>
+</resources>

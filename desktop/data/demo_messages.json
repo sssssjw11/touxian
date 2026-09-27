@@ -1,0 +1,48 @@
+{
+  "contact_display": "演示班级群（合成数据）",
+  "contact_username": "demo@chatroom",
+  "messages": [
+    {
+      "local_id": 1,
+      "timestamp": 1790038800,
+      "sender": "班委",
+      "type": "text",
+      "content": "@所有人 关于本学期课程补选的通知：请需要补选的同学于9月24日18:00前登录教务系统完成申请。"
+    },
+    {
+      "local_id": 2,
+      "timestamp": 1790128800,
+      "sender": "辅导员",
+      "type": "text",
+      "content": "各位同学，奖助学金材料提交截止时间为9月26日17:00，请符合条件的同学按学院通知上传材料。"
+    },
+    {
+      "local_id": 3,
+      "timestamp": 1790209800,
+      "sender": "班委",
+      "type": "text",
+      "content": "@所有人 下周一上午进行实验室安全培训，参加名单请在9月25日12:00前反馈给班委。"
+    },
+    {
+      "local_id": 4,
+      "timestamp": 1790215200,
+      "sender": "同学甲",
+      "type": "text",
+      "content": "收到，谢谢提醒。"
+    },
+    {
+      "local_id": 5,
+      "timestamp": 1790229600,
+      "sender": "班委",
+      "type": "text",
+      "content": "@所有人 学院开放了实习岗位信息查询入口，有需要的同学可查看学院官网公告。"
+    },
+    {
+      "local_id": 6,
+      "timestamp": 1790294400,
+      "sender": "同学乙",
+      "type": "text",
+      "content": "这份网络配置笔记供大家参考，不需要提交。"
+    }
+  ]
+}

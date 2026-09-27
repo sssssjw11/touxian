@@ -1,0 +1,18 @@
+# 统一换行符：仓库内存 LF，检出时按平台
+* text=auto eol=lf
+
+# 文本文件明确标记
+*.py    text diff=python
+*.md    text
+*.json  text
+*.csv   text
+
+# 二进制
+*.zip   binary
+*.rar   binary
+*.xlsx  binary
+*.docx  binary
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.gif   binary

@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">偷闲</string>
+    <string name="a11y_desc_disguised">读取并在本机保存当前可见微信会话，显示悬浮采集状态。仅在你明确开启历史回溯后慢速翻页，可随时暂停。不读取数据库，不填写或发送消息。</string>
+    <string name="provider_key_required">请先填写 %1$s 密钥</string>
+    <string name="provider_testing">正在测试 %1$s…</string>
+    <string name="provider_test_failed">失败：%1$s</string>
+    <string name="provider_test_success">%1$s 成功：意图=%2$s，候选=%3$d 条，耗时 %4$dms</string>
+</resources>
