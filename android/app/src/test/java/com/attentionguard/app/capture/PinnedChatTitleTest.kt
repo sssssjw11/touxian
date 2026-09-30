@@ -11,6 +11,12 @@ class PinnedChatTitleTest {
         Msg("other", "请在周三下午之前提交课程作业"), Msg("me", "收到"), Msg("other", "提交后请在群内确认完成")
     ), "com.tencent.mm")
 
+    @Test fun knownDifferentTitlesNeverInheritAPinEvenWithTheSameBubbles() {
+        val pin = PinnedChatTitle("A-B", 7, initial)
+        assertNull(pin.resolve(initial.copy(title = "AB"), 7))
+        assertTrue(pin.shouldExpire())
+    }
+
     @Test fun confirmedTitleFollowsOverlappingVisibleBubblesOnly() {
         val pin = PinnedChatTitle("课程群", 7, initial)
         assertEquals("课程群", pin.resolve(initial, 7)?.title)
@@ -32,13 +38,52 @@ class PinnedChatTitleTest {
         assertEquals("课程群(48)", pin.resolve(initial.copy(title = "课程群（49）"), 8)?.title)
     }
 
-    @Test fun emptyTreeDoesNotExpireButThreeUnmatchedScreensDo() {
+    @Test fun emptyTreeDoesNotExpireButThreeDistinctUnmatchedScreensDo() {
         val pin = PinnedChatTitle("课程群", 7, initial)
         repeat(4) { assertNull(pin.resolve(initial.copy(messages = emptyList()), 7)) }
         assertFalse(pin.shouldExpire())
-        repeat(3) { assertNull(pin.resolve(initial.copy(messages = listOf(Msg("other", "不匹配"))), 7)) }
+        repeat(3) { page ->
+            assertNull(pin.resolve(initial.copy(messages = listOf(Msg("other", "不匹配页面 $page"))), 7))
+        }
         assertTrue(pin.shouldExpire())
         assertNull(pin.resolve(initial, 7))
+    }
+
+    @Test fun pollingTheSameUnmatchedScreenDoesNotExpireTheConfirmedTitle() {
+        val pin = PinnedChatTitle("课程群", 7, initial)
+        val unmatched = initial.copy(messages = listOf(Msg("other", "完全没有重叠的另一屏")))
+        repeat(20) { poll ->
+            assertNull(pin.resolve(unmatched.copy(capturedAt = poll.toLong()), 7))
+            assertFalse(pin.shouldExpire())
+        }
+        assertEquals("课程群", pin.resolve(initial, 7)?.title)
+    }
+
+    @Test fun revisitingTwoUnmatchedScreensDoesNotCreateAThirdFailedPage() {
+        val pin = PinnedChatTitle("课程群", 7, initial)
+        val first = initial.copy(messages = listOf(Msg("other", "未匹配页面一")))
+        val second = initial.copy(messages = listOf(Msg("other", "未匹配页面二")))
+        repeat(4) {
+            assertNull(pin.resolve(first, 7))
+            assertNull(pin.resolve(second, 7))
+        }
+        assertFalse(pin.shouldExpire())
+        assertNull(pin.resolve(initial.copy(messages = listOf(Msg("other", "未匹配页面三"))), 7))
+        assertTrue(pin.shouldExpire())
+    }
+
+    @Test fun successfulOverlapResetsTheFailedPageSet() {
+        val pin = PinnedChatTitle("课程群", 7, initial)
+        val first = initial.copy(messages = listOf(Msg("other", "未匹配页面一")))
+        val second = initial.copy(messages = listOf(Msg("other", "未匹配页面二")))
+        assertNull(pin.resolve(first, 7))
+        assertNull(pin.resolve(second, 7))
+        val overlapping = initial.copy(messages = initial.messages.drop(1) + Msg("other", "另一条课程通知"))
+        assertEquals("课程群", pin.resolve(overlapping, 7)?.title)
+        assertNull(pin.resolve(first, 7))
+        assertNull(pin.resolve(second, 7))
+        assertFalse(pin.shouldExpire())
+        assertEquals("课程群", pin.resolve(overlapping, 7)?.title)
     }
 
     @Test fun genericRepliesCannotRebindARecreatedWindow() {

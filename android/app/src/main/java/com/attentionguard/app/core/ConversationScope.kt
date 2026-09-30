@@ -9,7 +9,7 @@ internal object ConversationScope {
     private val invisibleSpacing = Regex("[\u200B\uFEFF]")
     private val separators = setOf('-', '_', '.', '·', '•', '—', '–', '(', ')', '[', ']', '【', '】', '，', ',', '、', '/', '／')
 
-    fun equivalent(first: String, second: String): Boolean = normalize(first) == normalize(second)
+    fun equivalent(first: String, second: String): Boolean = normalize(first).let { it.isNotEmpty() && it == normalize(second) }
 
     fun matches(title: String, term: String): Boolean {
         val target = normalize(title)
@@ -20,21 +20,28 @@ internal object ConversationScope {
         if (memberCount.containsMatchIn(foldedTerm)) return false
         if (query.length < 2) return false
 
+        val original = fold(title)
+        val positions = original.indices.filter { !original[it].isSeparator() }
         var index = target.indexOf(query)
         while (index >= 0) {
             val end = index + query.length
-            val leftOk = !query.first().isAsciiWord() || index == 0 || !target[index - 1].isAsciiWord()
-            val rightOk = !query.last().isAsciiWord() || end == target.length || !target[end].isAsciiWord()
+            val leftOk = !query.first().isAsciiWord() || index == 0 || !target[index - 1].isAsciiWord() ||
+                positions[index] - positions[index - 1] > 1
+            val rightOk = !query.last().isAsciiWord() || end == target.length || !target[end].isAsciiWord() ||
+                positions[end] - positions[end - 1] > 1
             if (leftOk && rightOk) return true
             index = target.indexOf(query, index + 1)
         }
         return false
     }
 
-    private fun normalize(value: String): String {
+    private fun fold(value: String): String {
         val folded = invisibleSpacing.replace(Normalizer.normalize(value.trim(), Normalizer.Form.NFKC), "").lowercase(Locale.ROOT)
-        return memberCount.replace(folded, "").filterNot { it.isWhitespace() || it in separators }
+        return memberCount.replace(folded, "")
     }
+
+    private fun normalize(value: String): String = fold(value).filterNot { it.isSeparator() }
+    private fun Char.isSeparator(): Boolean = isWhitespace() || this in separators
 
     private fun Char.isAsciiWord(): Boolean = this in 'a'..'z' || this in '0'..'9'
 }

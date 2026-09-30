@@ -37,4 +37,33 @@
     <item name="ag_archive_all" type="id" />
     <item name="ag_archive_history" type="id" />
     <item name="ag_archive_modes" type="id" />
+    <item name="ag_conversation_list" type="id" />
+    <item name="ag_conversation_detail" type="id" />
+    <item name="ag_conversation_status" type="id" />
+    <item name="ag_conversation_range" type="id" />
+    <item name="ag_conversation_all" type="id" />
+    <item name="ag_conversation_three_days" type="id" />
+    <item name="ag_conversation_seven_days" type="id" />
+    <item name="ag_conversation_custom" type="id" />
+    <item name="ag_conversation_start" type="id" />
+    <item name="ag_conversation_end" type="id" />
+    <item name="ag_conversation_undated" type="id" />
+    <item name="ag_conversation_quality" type="id" />
+    <item name="ag_conversation_analyze" type="id" />
+    <item name="ag_conversation_cloud" type="id" />
+    <item name="ag_conversation_result" type="id" />
+    <item name="ag_conversation_messages" type="id" />
+    <item name="ag_conversation_more" type="id" />
+    <item name="ag_conversation_resume" type="id" />
+    <item name="ag_conversation_stop" type="id" />
+    <item name="ag_conversation_delete" type="id" />
+    <item name="ag_conversation_refresh" type="id" />
+    <item name="ag_message_keywords" type="id" />
+    <item name="ag_keyword_list" type="id" />
+    <item name="ag_keyword_add" type="id" />
+    <item name="ag_keyword_input" type="id" />
+    <item name="ag_keyword_category" type="id" />
+    <item name="ag_keyword_priority" type="id" />
+    <item name="ag_keyword_enabled" type="id" />
+    <item name="ag_keyword_status" type="id" />
 </resources>

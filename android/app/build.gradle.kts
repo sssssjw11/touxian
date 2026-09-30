@@ -23,8 +23,8 @@ android {
         applicationId = "com.attentionguard.app"
         minSdk = 30
         targetSdk = 35
-        versionCode = 23
-        versionName = "1.22"
+        versionCode = 26
+        versionName = "1.25"
     }
 
     signingConfigs {

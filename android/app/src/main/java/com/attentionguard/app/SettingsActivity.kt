@@ -1,5 +1,7 @@
 package com.attentionguard.app
 
+import android.content.Intent
+
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -96,10 +98,13 @@ class SettingsActivity : AppCompatActivity() {
         val contextField = ui.field("群聊语境", prefs.relationship, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE, R.id.ag_context)
         context = contextField.second.apply { minLines = 2; gravity = Gravity.TOP }
         rulesSection.addView(contextField.first)
-        val scopeField = ui.field("会话关键词", prefs.whitelist.sorted().joinToString("\n"), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE, R.id.ag_whitelist)
+        val scopeField = ui.field("会话名称关键词", prefs.whitelist.sorted().joinToString("\n"), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE, R.id.ag_whitelist)
         whitelist = scopeField.second.apply { minLines = 2; gravity = Gravity.TOP }
         scopeField.first.helperText = "每行一个；留空表示所有当前会话"
         rulesSection.addView(scopeField.first)
+        rulesSection.addView(ui.button("消息正文关键词", R.drawable.ag_scan_text, false) {
+            startActivity(Intent(this, MessageKeywordActivity::class.java))
+        }.apply { id = R.id.ag_message_keywords; layoutParams = ui.lp(12) })
         auto = ui.toggle("自动整理可见新消息", prefs.autoAnalyze, R.id.ag_auto)
         rulesSection.addView(auto)
         body.addView(rulesSection)

@@ -7,6 +7,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
 import com.google.android.material.button.MaterialButton
 import com.attentionguard.app.core.MessageArchive
@@ -36,6 +37,11 @@ import java.util.concurrent.TimeUnit
 class TestCaptureService : ChatCaptureService() {
     var activeRoot: AccessibilityNodeInfo? = null
     val screenshots = mutableListOf<TakeScreenshotCallback>()
+    var fakeTitleReader = false
+    val titleReads = mutableListOf<Pair<() -> Boolean, (String?, String) -> Unit>>()
+    override fun readChatTitle(result: ChatInspection, stillCurrent: () -> Boolean, done: (String?, String) -> Unit) {
+        if (fakeTitleReader) titleReads.add(stillCurrent to done) else super.readChatTitle(result, stillCurrent, done)
+    }
     override fun getRootInActiveWindow() = activeRoot
     override fun getWindows() = emptyList<AccessibilityWindowInfo>()
     override fun takeScreenshot(displayId: Int, executor: Executor, callback: TakeScreenshotCallback) {
@@ -114,6 +120,130 @@ class ChatCaptureServiceTest {
         service.activeRoot = root(); tick()
         MessageArchive(context).use { assertEquals(1, it.count().total) }
         assertTrue(windows.views.isNotEmpty())
+    }
+    @Test fun anAllowedUnreadableTitleIsRecoveredLocallyWithoutReaddingTerms() {
+        Prefs(context).whitelist = setOf("Building group")
+        Prefs(context).localOcrEnabled = true
+        service.fakeTitleReader = true
+        service.activeRoot = root(title = "", message = "请大家明天提交作业")
+        service.connect(); tick()
+        assertEquals(1, service.titleReads.size)
+        assertTrue(EventStore(context).load().isEmpty())
+        assertTrue(service.titleReads.single().first())
+        service.titleReads.single().second("Building group(457)", "本机标题识别完成")
+        drain()
+        assertEquals(1, EventStore(context).load().size)
+        MessageArchive(context).use { assertEquals("Building group(457)", it.recent().single().group) }
+    }
+    @Test fun fullScreenScrollWithoutOverlapRechecksTheHeaderAndKeepsCapturing() {
+        Prefs(context).whitelist = setOf("Building group")
+        Prefs(context).localOcrEnabled = true
+        service.fakeTitleReader = true
+        service.activeRoot = root(title = "", message = "请大家明天提交作业")
+        service.connect(); tick()
+        service.titleReads[0].second("Building group(457)", "ok"); drain()
+        service.activeRoot = root(title = "", message = "后天上午十点到会议室参加会议")
+        tick()
+        assertEquals(2, service.titleReads.size)
+        service.titleReads[1].second("Building group(457)", "ok"); drain()
+        MessageArchive(context).use { assertEquals(2, it.count().total) }
+        assertTrue(CaptureDiagnostics(context).summary().contains("正在监测可见消息"))
+    }
+    @Test fun anOcrTitleFromThePreviousScreenCannotBindTheNextConversation() {
+        Prefs(context).whitelist = setOf("Building group")
+        Prefs(context).localOcrEnabled = true
+        service.fakeTitleReader = true
+        service.activeRoot = root(title = "", message = "请大家明天提交作业")
+        service.connect(); tick()
+        service.activeRoot = root(title = "", message = "另一个会话的内容完全不同")
+        assertFalse(service.titleReads[0].first())
+        service.titleReads[0].second("Building group", "ok"); drain()
+        assertTrue(EventStore(context).load().isEmpty())
+        tick()
+        service.titleReads.last().second("Outside group", "ok"); drain()
+        MessageArchive(context).use { assertEquals(0, it.count().total) }
+        assertTrue(CaptureDiagnostics(context).summary().contains("未匹配"))
+    }
+    @Test fun markingAReadableTitleAlsoPinsItForTheNextEmptyTitleFrame() {
+        service.fakeTitleReader = true
+        val message = "请大家明天提交课程作业并在群里确认"
+        service.activeRoot = root(title = "Building group", message = message)
+        service.connect(); tick()
+        ChatCaptureService::class.java.getDeclaredMethod("markCurrentChat").apply { isAccessible = true }.invoke(service)
+        service.activeRoot = root(title = "", message = message)
+        tick()
+        assertTrue(service.titleReads.isEmpty())
+        assertTrue(CaptureDiagnostics(context).summary().contains("标题由手动确认"))
+        assertTrue(Prefs(context).isAllowed("Building group"))
+    }
+    @Test fun automaticTitleFailureIsThrottledAndDoesNotGuessFromTheWhitelist() {
+        Prefs(context).whitelist = setOf("Only allowed group")
+        Prefs(context).localOcrEnabled = true
+        service.fakeTitleReader = true
+        service.activeRoot = root(title = "", message = "请大家明天提交作业")
+        service.connect(); tick()
+        service.titleReads[0].second(null, "标题未能自动识别")
+        tick(); tick()
+        assertEquals(1, service.titleReads.size)
+        assertTrue(EventStore(context).load().isEmpty())
+        tick(10)
+        assertEquals(2, service.titleReads.size)
+    }
+    @Test fun navigatingWithIdenticalBubblesCancelsTheOldTitleRequest() {
+        Prefs(context).whitelist = setOf("Building group")
+        Prefs(context).localOcrEnabled = true
+        service.fakeTitleReader = true
+        service.activeRoot = root(title = "", message = "请大家明天提交作业")
+        service.connect(); tick()
+        val event = AccessibilityEvent.obtain(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED).apply { packageName = "com.tencent.mm" }
+        service.onAccessibilityEvent(event)
+        assertFalse(service.titleReads[0].first())
+        service.titleReads[0].second("Building group", "ok"); drain()
+        assertTrue(EventStore(context).load().isEmpty())
+    }
+    @Test fun intentRecordingSurvivesATitleRepaintWithTheSameMessages() {
+        Prefs(context).captureMode = CaptureMode.INTENT
+        service.activeRoot = root(title = "Building group", message = "请大家明天提交课程作业并在群里确认")
+        service.connect(); tick()
+        assertTrue(service.startRecording()); tick()
+        service.activeRoot = root(title = "", message = "请大家明天提交课程作业并在群里确认")
+        tick()
+        assertEquals(com.attentionguard.app.core.RecordingState.ACTIVE, CaptureRuntime.recording?.state)
+        MessageArchive(context).use { assertEquals(1, it.count().total) }
+    }
+    @Test fun cancellingTheMarkPageDoesNotBlockFutureAutomaticTitleReads() {
+        service.activeRoot = root(title = "", message = "请在周三下午之前提交课程作业")
+        service.connect(); tick(); mark(); advance(300)
+        service.screenshots.single().onFailure(2); advance(1)
+        val confirmation = shadowOf(service).nextStartedActivity!!
+        val activity = Robolectric.buildActivity(MarkChatActivity::class.java, confirmation).setup()
+        activity.get().finish(); activity.pause().stop().destroy()
+        service.fakeTitleReader = true
+        Prefs(context).localOcrEnabled = true
+        tick()
+        assertEquals(1, service.titleReads.size)
+    }
+    @Test fun addingAMessageRuleReanalyzesTheCurrentScreenWithoutChangingConversationScope() {
+        Prefs(context).whitelist = setOf("Building group")
+        service.activeRoot = root(title = "Building group", message = "楼下还有矿泉水")
+        service.connect(); tick()
+        assertTrue(EventStore(context).load().isEmpty())
+        Prefs(context).messageKeywordRules = listOf(com.attentionguard.app.core.MessageKeywordRule(
+            "矿泉水", com.attentionguard.app.core.EventCategory.ACTIVITY, com.attentionguard.app.core.EventPriority.P1))
+        tick()
+        val event = EventStore(context).load().single()
+        assertEquals(com.attentionguard.app.core.EventCategory.ACTIVITY, event.category)
+        assertEquals(com.attentionguard.app.core.EventPriority.P1, event.priority)
+        assertTrue(event.reviewNotes.any { it.startsWith(com.attentionguard.app.core.MessageKeywordRule.EVIDENCE_PREFIX) })
+        assertEquals(setOf("Building group"), Prefs(context).whitelist)
+    }
+    @Test fun messageRulesDoNotCreateAutomaticEventsInIntentMode() {
+        Prefs(context).captureMode = CaptureMode.INTENT
+        Prefs(context).messageKeywordRules = listOf(com.attentionguard.app.core.MessageKeywordRule("矿泉水"))
+        service.activeRoot = root(title = "Building group", message = "楼下还有矿泉水")
+        service.connect(); tick()
+        assertTrue(EventStore(context).load().isEmpty())
+        MessageArchive(context).use { assertEquals(0, it.count().total) }
     }
     @Test fun sameScreenDoesNotDuplicateMessagesAndDisabledAutoStillRecords() {
         Prefs(context).autoAnalyze = false
@@ -321,6 +451,77 @@ class ChatCaptureServiceTest {
         Prefs(context).enabled = false; tick()
         assertTrue(windows.views.isEmpty())
         assertFalse(service.armHistory(HistoryConfig("Test group", HistoryRange(LocalDate.now(), LocalDate.now()), true)))
+    }
+
+    @Test fun intentRecordingRequiresAnExplicitStartAndPausesOnAnotherChat() {
+        Prefs(context).captureMode = CaptureMode.INTENT
+        service.activeRoot = root(message = "请大家明天提交作业"); service.connect(); tick()
+        MessageArchive(context).use { assertEquals(0, it.count().total) }
+        assertTrue(service.startRecording()); tick()
+        val id = CaptureRuntime.recording!!.id
+        MessageArchive(context).use { assertEquals(1, it.count(id).total) }
+        assertTrue(EventStore(context).load().isEmpty())
+        service.activeRoot = root(title = "Another group", message = "不可混入"); tick()
+        assertEquals(com.attentionguard.app.core.RecordingState.PAUSED, CaptureRuntime.recording!!.state)
+        MessageArchive(context).use { assertEquals(1, it.count(id).total) }
+        service.activeRoot = root(message = "新消息"); tick()
+        MessageArchive(context).use { assertEquals(1, it.count(id).total) }
+        assertTrue(service.startRecording()); tick()
+        MessageArchive(context).use { assertEquals(2, it.count(id).total) }
+    }
+
+    @Test fun recordingNeedsATitleButIntentDoesNotAndModeSwitchPausesIt() {
+        Prefs(context).captureMode = CaptureMode.INTENT
+        service.activeRoot = root(title = "", message = "谢谢你"); service.connect(); tick()
+        assertFalse(service.startRecording())
+        service.activeRoot = root(message = "第一条"); tick()
+        assertTrue(service.startRecording()); tick()
+        Prefs(context).captureMode = CaptureMode.EVENT; tick()
+        assertEquals(com.attentionguard.app.core.RecordingState.PAUSED, CaptureRuntime.recording!!.state)
+        assertFalse(service.startRecording())
+    }
+
+    @Test fun aWechatNavigationRequiresExplicitRecordingConfirmation() {
+        Prefs(context).captureMode = CaptureMode.INTENT
+        service.activeRoot = root(message = "第一条"); service.connect(); tick()
+        assertTrue(service.startRecording()); tick()
+        service.onAccessibilityEvent(AccessibilityEvent.obtain(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED).apply {
+            packageName = "com.tencent.mm"
+        })
+        tick()
+        assertEquals(com.attentionguard.app.core.RecordingState.PAUSED, CaptureRuntime.recording!!.state)
+    }
+
+    @Test fun intentResultOnlyBecomesAnAppEventAfterManualSave() {
+        Prefs(context).captureMode = CaptureMode.INTENT
+        service.activeRoot = root(message = "请大家明天提交课程作业"); service.connect(); tick()
+        assertTrue(EventStore(context).load().isEmpty())
+        windows.views.asSequence().flatMap { children(it) }.first { it.contentDescription == "更多悬浮窗操作" }.performClick(); tick()
+        windows.views.asSequence().flatMap { children(it) }.first { it.contentDescription == "保存当前事项" }.performClick(); tick()
+        assertTrue(EventStore(context).load().isNotEmpty())
+        assertEquals(CaptureMode.INTENT, Prefs(context).captureMode)
+        assertTrue(CaptureDiagnostics(context).eventStorageLabel().contains("已保存"))
+    }
+
+    @Test fun fastVisibleScreensQueueInOrderInsteadOfBeingSilentlyDropped() {
+        Prefs(context).captureMode = CaptureMode.INTENT
+        service.activeRoot = root(message = "第一页"); service.connect(); tick()
+        assertTrue(service.startRecording()); tick()
+        val id = CaptureRuntime.recording!!.id
+        val storage = ChatCaptureService::class.java.getDeclaredField("storageWorker").apply { isAccessible = true }.get(service) as ExecutorService
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        storage.execute { entered.countDown(); release.await(3, TimeUnit.SECONDS) }
+        assertTrue(entered.await(3, TimeUnit.SECONDS))
+        val capture = ChatCaptureService::class.java.getDeclaredMethod("safeCapture").apply { isAccessible = true }
+        try {
+            for (text in listOf("第二页", "第二页", "第三页", "第四页")) {
+                service.activeRoot = root(message = text); capture.invoke(service)
+            }
+        } finally { release.countDown() }
+        tick()
+        MessageArchive(context).use { archive ->
+            assertEquals(listOf("第一页", "第二页", "第三页", "第四页"), archive.recordingMessages(id).map { it.message.text })
+        }
     }
 
     @Test fun automaticHistoryOnlyScrollsBackwardAtTheIntervalAndStopsWhenStalled() {

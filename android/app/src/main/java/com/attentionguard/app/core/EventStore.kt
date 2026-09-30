@@ -1,6 +1,7 @@
 package com.attentionguard.app.core
 
 import android.content.Context
+import android.content.SharedPreferences
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -16,6 +17,14 @@ class EventStore(context: Context) {
 
     var readFailed = false
         private set
+
+    fun observe(onChanged: () -> Unit): () -> Unit {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == KEY_REVISION) onChanged()
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        return { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
 
     fun load(): List<AttentionEvent> = synchronized(LOCK) {
         readFailed = false
@@ -94,6 +103,7 @@ class EventStore(context: Context) {
             // no SharedPreferences memory update before a successful disk write.
             Files.move(pending.toPath(), file.toPath(),
                 StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+            prefs.edit().putLong(KEY_REVISION, prefs.getLong(KEY_REVISION, 0) + 1).apply()
         } finally {
             if (pending.isFile) pending.delete()
         }
@@ -190,6 +200,7 @@ class EventStore(context: Context) {
     companion object {
         internal const val FILE_NAME = "attention_guard_events_v1.json"
         private const val KEY_EVENTS = "events_json"
+        private const val KEY_REVISION = "events_revision"
         private val LOCK = Any()
         // Only the four fixed fixture IDs from v1.2. Live engine IDs have a different format.
         private val LEGACY_DEMO_IDS = setOf("assessment", "network-lab", "scholarship", "career-fair")

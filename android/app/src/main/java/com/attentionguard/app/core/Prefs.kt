@@ -1,6 +1,8 @@
 package com.attentionguard.app.core
 
 import android.content.Context
+import org.json.JSONArray
+import org.json.JSONObject
 
 enum class CaptureMode(val label: String) { EVENT("事件监测"), INTENT("意图分析") }
 enum class OverlaySize { EXPANDED, COMPACT, BUBBLE }
@@ -95,6 +97,44 @@ class Prefs(context: Context) {
         }
     }
 
+    var messageKeywordRules: List<MessageKeywordRule>
+        get() = runCatching {
+            val array = JSONArray(sp.getString(K_MESSAGE_KEYWORD_RULES, "[]"))
+            buildList {
+                for (index in 0 until array.length().coerceAtMost(100)) {
+                    val item = array.optJSONObject(index) ?: continue
+                    val keyword = item.optString("keyword").trim()
+                    if (keyword.isEmpty() || keyword.length > 80) continue
+                    val category = runCatching { EventCategory.valueOf(item.optString("category", EventCategory.ACADEMIC_ADMIN.name)) }.getOrNull() ?: continue
+                    val priority = runCatching { EventPriority.valueOf(item.optString("priority", EventPriority.P2.name)) }.getOrNull() ?: continue
+                    add(MessageKeywordRule(keyword, category, priority,
+                        item.optString("id").takeIf { it.isNotBlank() } ?: MessageKeywordRule.legacyId(keyword),
+                        item.optBoolean("enabled", true)))
+                }
+            }.distinctBy { it.id }.distinctBy { MessageKeywordRule.normalizedKeyword(it.keyword) }
+        }.getOrDefault(emptyList())
+        set(value) = synchronized(MESSAGE_KEYWORD_LOCK) {
+            val existing = messageKeywordRules
+            val existingIds = existing.map { it.id }.toSet()
+            val existingByKeyword = existing.associateBy { MessageKeywordRule.normalizedKeyword(it.keyword) }
+            val rules = value.map { rule ->
+                val keyword = rule.keyword.trim()
+                require(keyword.isNotBlank() && keyword.length <= 80) { "消息关键词须为 1 到 80 个字符" }
+                require(rule.id.isNotBlank()) { "消息关键词规则缺少标识" }
+                val id = if (rule.id in existingIds) rule.id else
+                    existingByKeyword[MessageKeywordRule.normalizedKeyword(keyword)]?.id ?: rule.id
+                rule.copy(keyword = keyword, id = id)
+            }.distinctBy { it.id }.distinctBy { MessageKeywordRule.normalizedKeyword(it.keyword) }
+            require(rules.size <= 100) { "消息关键词规则最多 100 条" }
+            val json = JSONArray().apply {
+                rules.forEach { rule -> put(JSONObject().apply {
+                    put("id", rule.id); put("keyword", rule.keyword); put("category", rule.category.name)
+                    put("priority", rule.priority.name); put("enabled", rule.enabled)
+                }) }
+            }
+            check(sp.edit().putString(K_MESSAGE_KEYWORD_RULES, json.toString()).commit()) { "消息关键词保存失败" }
+        }
+
     /** Overlay background opacity, 0..100 (%); controls and text stay opaque. */
     var overlayOpacity: Int
         get() = sp.getInt(K_OPACITY, 92).coerceIn(0, 100)
@@ -148,6 +188,7 @@ class Prefs(context: Context) {
     companion object {
         private val KEY_LOCK = Any()
         private val WHITELIST_LOCK = Any()
+        private val MESSAGE_KEYWORD_LOCK = Any()
         private const val K_KEY = "openrouter_key"
         private const val K_REPLY_MODEL = "reply_model"
         private const val K_API_PROVIDER = "api_provider"
@@ -156,6 +197,7 @@ class Prefs(context: Context) {
         private const val K_REL = "relationship"
         private const val K_ENABLED = "enabled"
         private const val K_WHITELIST = "whitelist"
+        private const val K_MESSAGE_KEYWORD_RULES = "message_keyword_rules"
         private const val K_OPACITY = "overlay_opacity"
         private const val K_BUBBLE_Y = "bubble_y"
         private const val K_COLLAPSED = "overlay_collapsed"

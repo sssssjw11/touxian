@@ -14,7 +14,7 @@ class JevIntentEngineTest {
         assertEquals("同学", insight.sender)
         assertEquals("课程群", insight.group)
         assertEquals(IntentImportance.HIGH, insight.importance)
-        assertTrue(insight.confidence in 85..94)
+        assertTrue(insight.confidence in 75..90)
     }
 
     @Test fun emotionalAndClosingMessagesDoNotBecomeTasks() {
@@ -238,6 +238,66 @@ class JevIntentEngineTest {
         assertEquals(single.confidence, repeated.confidence)
         assertTrue(words.confidence > single.confidence)
         assertEquals("出现负向情绪", words.label)
+    }
+
+    @Test fun negatedCompletedAndQuotedTasksAreNotNewActionRequests() {
+        listOf("不用提交报告", "请不要提交报告", "我已经完成报告了", "她说“请提交报告”", "他说他已经提交报告").forEach { text ->
+            val insight = requireNotNull(JevIntentEngine.analyze(snapshot(text)))
+            assertNotEquals(text, "可能在提出行动请求", insight.label)
+            assertNotEquals(text, IntentImportance.HIGH, insight.importance)
+        }
+        assertEquals("可能在提出行动请求", JevIntentEngine.analyze(snapshot("请确认报名已完成"))?.label)
+        assertEquals("可能在寻求解释", JevIntentEngine.analyze(snapshot("报告已经提交了吗？"))?.label)
+        assertEquals("可能在提出行动请求", JevIntentEngine.analyze(snapshot("请明天提交报告，知道了吗？"))?.label)
+    }
+
+    @Test fun anotherMembersClosingDoesNotEraseTheCurrentMembersRequest() {
+        val chat = snapshot("明天之前可以吗？", "甲").copy(messages = listOf(
+            Msg("other", "请帮我提交材料", "甲"),
+            Msg("other", "不用了", "乙"),
+            Msg("other", "明天之前可以吗？", "甲")
+        ))
+        assertEquals("可能在跟进先前请求", JevIntentEngine.analyze(chat)?.label)
+    }
+
+    @Test fun otherMembersRequestsDoNotRaiseCurrentMessageConfidence() {
+        val current = snapshot("请提交报告", "甲")
+        val unrelated = current.copy(messages = listOf(
+            Msg("other", "请大家明天17:00前提交作业", "乙"),
+            Msg("other", "请大家报名竞赛", "丙")
+        ) + current.messages)
+        assertEquals(JevIntentEngine.analyze(current)?.confidence, JevIntentEngine.analyze(unrelated)?.confidence)
+    }
+
+    @Test fun deniedAndReportedEmotionsDoNotBecomeTheSpeakersFeelings() {
+        listOf("我没有生气", "我没有不开心", "他很难过", "她说“我很难过”").forEach { text ->
+            val insight = requireNotNull(JevIntentEngine.analyze(snapshot(text)))
+            assertEquals(text, "情绪不明显", insight.affect?.label)
+            assertNotEquals(text, "可能在表达情绪", insight.label)
+        }
+        assertEquals("出现负向情绪", JevIntentEngine.analyze(snapshot("我真的很不开心"))?.affect?.label)
+        assertEquals("表达关切", JevIntentEngine.analyze(snapshot("别难过，我陪你"))?.affect?.label)
+        assertEquals("积极亲近", JevIntentEngine.analyze(snapshot("他很难过，我很开心"))?.affect?.label)
+        val inquiry = requireNotNull(JevIntentEngine.analyze(snapshot("你生气了吗？")))
+        assertEquals("可能在寻求解释", inquiry.label)
+        assertEquals("在询问感受", inquiry.affect?.label)
+    }
+
+    @Test fun repeatingOneExpressionAcrossTurnsDoesNotIncreaseAffectCertainty() {
+        val single = snapshot("[发怒]")
+        val repeated = single.copy(messages = listOf(
+            Msg("other", "[发怒]", "同学"),
+            Msg("other", "[发怒]", "同学"),
+            Msg("other", "[发怒]", "同学")
+        ))
+        assertEquals(JevIntentEngine.analyze(single)?.affect?.confidence, JevIntentEngine.analyze(repeated)?.affect?.confidence)
+    }
+
+    @Test fun distantPositiveToneDoesNotOverrideCurrentExplicitDistress() {
+        val current = snapshot("我真的很难过，失望又难受")
+        val chat = current.copy(messages = listOf(Msg("other", "今天很开心", "同学")) +
+            (1..6).map { Msg("me", "继续说") } + current.messages)
+        assertEquals("出现负向情绪", JevIntentEngine.analyze(chat)?.affect?.label)
     }
 
     @Test fun ownExpressionAndOtherGroupMembersDoNotBecomeCounterpartEmotion() {

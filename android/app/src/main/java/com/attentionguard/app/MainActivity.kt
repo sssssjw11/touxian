@@ -38,6 +38,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var scroll: ScrollView
     private lateinit var nav: BottomNavigationView
     private var events = emptyList<AttentionEvent>()
+    private var stopObservingEvents: (() -> Unit)? = null
     private var demoEvents = DemoAttentionData.events
     private var tab = R.id.ag_attention
     private var filter = EventFilter.ALL
@@ -107,6 +108,24 @@ class MainActivity : AppCompatActivity() {
         return true
     }
 
+    override fun onStart() {
+        super.onStart()
+        stopObservingEvents = store.observe {
+            if (prefs.demoMode) return@observe
+            val current = store.load()
+            if (current != events || store.readFailed) {
+                if (rendered && detailId == null) positions[tab] = scroll.scrollY
+                events = current
+                render()
+            }
+        }
+    }
+
+    override fun onStop() {
+        stopObservingEvents?.invoke(); stopObservingEvents = null
+        super.onStop()
+    }
+
     override fun onResume() {
         super.onResume()
         if (rendered && detailId == null) positions[tab] = scroll.scrollY
@@ -153,6 +172,10 @@ class MainActivity : AppCompatActivity() {
             scroll.post { scroll.scrollTo(0, positions[tab] ?: 0) }
         }
         rendered = true
+        CaptureDiagnostics(this).appList(events.size,
+            if (tab == R.id.ag_ledger) ledgerMatches().size else events.count { !it.archived },
+            filter != EventFilter.ALL || dateFilter != EventDateFilter.ALL || priorityFilter != EventPriorityFilter.ALL || query.isNotBlank(),
+            prefs.demoMode, store.readFailed)
         if (animate) GuardMotion.revealRows(body)
     }
 
@@ -235,6 +258,9 @@ class MainActivity : AppCompatActivity() {
                 LinearLayout.LayoutParams(0, -1, 1f).apply { leftMargin = ui.dp(10) })
         })
         val status = CaptureDiagnostics(this).healthLabel(prefs.enabled, isA11yEnabled())
+        body.addView(ui.navigationRow(R.drawable.ag_notebook_tabs, "会话分析", "已保存聊天 · 关系与语境") {
+            startActivity(Intent(this, ConversationAnalysisActivity::class.java))
+        }.apply { layoutParams = ui.lp(12) })
         body.addView(ui.row().apply {
             minimumHeight = ui.dp(48)
             addView(ui.icon(R.drawable.ag_activity, ui.brand, 16))

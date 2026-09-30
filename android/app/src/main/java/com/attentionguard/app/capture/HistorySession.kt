@@ -75,11 +75,14 @@ interface CaptureActions {
     fun pauseHistory()
     fun cancelHistory()
     fun confirmCurrentTitle(title: String): Boolean = false
+    fun cancelCurrentTitle() = Unit
 }
 
 /** Same-process UI bridge; no exported broadcast or remote control surface. */
 object CaptureRuntime {
     var actions: CaptureActions? = null
+    @Volatile var recordingActions: RecordingActions? = null
+    @Volatile var recording: com.attentionguard.app.core.ChatRecording? = null
     var history: HistorySession? = null
     var lastVisibleTitle: String? = null
 }

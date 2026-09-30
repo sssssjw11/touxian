@@ -31,6 +31,6 @@ data class ChatSnapshot(
 
     /** Title recovery must not make an unchanged message viewport look different. */
     fun messagesSignature(): String = messages.joinToString("|") {
-            "${it.side}:${it.sender.orEmpty()}:${it.type}:${it.text.length}:${it.text}:${it.date}:${it.timeLabel}:${it.captureMethod}"
+            "${it.side}:${it.sender.orEmpty()}:${it.type}:${it.text.length}:${it.text}:${it.date}:${it.timeLabel}:${it.timestamp}:${it.captureMethod}"
         }
 }

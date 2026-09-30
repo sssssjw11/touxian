@@ -80,4 +80,51 @@ class PrefsTest {
         prefs.overlayCollapsed = false
         assertEquals(OverlaySize.EXPANDED, prefs.overlaySize)
     }
+
+    @Test fun messageKeywordRulesRoundTripAndStaySeparateFromConversationTerms() {
+        prefs.whitelist = setOf("23网工2")
+        val rules = listOf(
+            MessageKeywordRule("训练营", EventCategory.ACTIVITY, EventPriority.P1, "stable-a"),
+            MessageKeywordRule(" API ", EventCategory.COURSE, EventPriority.P3, "stable-b", enabled = false)
+        )
+        prefs.messageKeywordRules = rules
+        assertEquals(rules.map { it.copy(keyword = it.keyword.trim()) }, Prefs(RuntimeEnvironment.getApplication()).messageKeywordRules)
+        assertEquals(setOf("23网工2"), prefs.whitelist)
+    }
+
+    @Test fun normalizedDuplicatesKeepTheFirstRuleAndAnExistingStableId() {
+        prefs.messageKeywordRules = listOf(MessageKeywordRule("AI", id = "original"))
+        prefs.messageKeywordRules = listOf(
+            MessageKeywordRule(" ai ", priority = EventPriority.P1, id = "new-id"),
+            MessageKeywordRule("ＡＩ", priority = EventPriority.P0, id = "duplicate")
+        )
+        val rule = prefs.messageKeywordRules.single()
+        assertEquals("original", rule.id)
+        assertEquals(EventPriority.P1, rule.priority)
+        prefs.messageKeywordRules = listOf(rule.copy(keyword = "API"))
+        assertEquals("original", prefs.messageKeywordRules.single().id)
+    }
+
+    @Test fun invalidMessageKeywordsDoNotOverwriteSavedRules() {
+        val original = listOf(MessageKeywordRule("训练营", id = "saved"))
+        prefs.messageKeywordRules = original
+        for (rule in listOf(MessageKeywordRule("  "), MessageKeywordRule("x".repeat(81)), MessageKeywordRule("valid", id = ""))) {
+            assertThrows(IllegalArgumentException::class.java) { prefs.messageKeywordRules = listOf(rule) }
+            assertEquals(original, prefs.messageKeywordRules)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            prefs.messageKeywordRules = (1..101).map { MessageKeywordRule("词条$it", id = "id-$it") }
+        }
+        assertEquals(original, prefs.messageKeywordRules)
+    }
+
+    @Test fun missingIdsReadStablyAndMalformedStoredRulesDoNotCrash() {
+        val stored = RuntimeEnvironment.getApplication().getSharedPreferences("attention_guard", android.content.Context.MODE_PRIVATE)
+        stored.edit().putString("message_keyword_rules", "[{\"keyword\":\"训练营\"}]").commit()
+        val first = prefs.messageKeywordRules.single()
+        assertEquals(first.id, prefs.messageKeywordRules.single().id)
+        assertEquals(EventPriority.P2, first.priority)
+        stored.edit().putString("message_keyword_rules", "not-json").commit()
+        assertTrue(prefs.messageKeywordRules.isEmpty())
+    }
 }

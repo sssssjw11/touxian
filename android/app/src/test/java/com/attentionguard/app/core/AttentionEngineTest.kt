@@ -200,6 +200,43 @@ class AttentionEngineTest {
         val b = event(Msg("other", "请提交数据库实验报告", "老师"))
         org.junit.Assert.assertNotEquals(a.id, b.id)
     }
+
+    @Test fun unrelatedCancellationBySameSenderDoesNotCancelEarlierNotice() {
+        val result = AttentionEngine.buildEvents(ChatSnapshot("通知群", listOf(
+            Msg("other", "请报名数学竞赛", "老师"),
+            Msg("other", "更正：今晚班会取消", "老师")
+        )))
+        assertEquals(2, result.size)
+        assertEquals(EventStatus.ACTION_REQUIRED, result.first().status)
+        assertEquals(EventCategory.COMPETITION, result.first().category)
+        assertEquals(EventCategory.MEETING, result.last().category)
+        assertEquals(EventPriority.P3, result.last().priority)
+        val sameCategory = AttentionEngine.buildEvents(ChatSnapshot("通知群", listOf(
+            Msg("other", "请提交综测材料", "老师"),
+            Msg("other", "更正：奖学金申请取消", "老师")
+        )))
+        assertEquals(2, sameCategory.size)
+        assertEquals(EventStatus.ACTION_REQUIRED, sameCategory.first().status)
+    }
+
+    @Test fun completedAndExplicitlyReportedTasksDoNotBecomeAuthorityNotices() {
+        listOf("我已经提交报告了", "报名已经完成", "她说“请提交报告”").forEach { text ->
+            assertTrue(text, AttentionEngine.buildEvents(ChatSnapshot("通知群", listOf(Msg("other", text, "老师")))).isEmpty())
+        }
+    }
+
+    @Test fun cancellationOfCheckboxDoesNotCancelTheActualSubmissionRequest() {
+        val result = event(Msg("other", "请填写表格并取消勾选不适用项", "老师"))
+        assertEquals(EventStatus.ACTION_REQUIRED, result.status)
+        assertNotNull(result.actionLabel)
+    }
+
+    @Test fun usefulDeadlineOnlyNoticeIsRecordedWithoutInventingARequiredAction() {
+        val result = event(Msg("other", "课程作业截止时间：2026年9月25日下午五点", "同学"))
+        assertEquals(EventStatus.MONITORING, result.status)
+        assertEquals(EventCategory.COURSE, result.category)
+        assertEquals("2026-09-25 17:00", result.dueLabel)
+    }
 }
 
 

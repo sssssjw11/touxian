@@ -7,6 +7,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.net.Uri
 import android.provider.Settings
 import android.text.InputType
 import android.view.Gravity
@@ -15,6 +16,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.widget.SwitchCompat
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.button.MaterialButtonToggleGroup
@@ -64,6 +66,16 @@ class CaptureActivity : AppCompatActivity() {
     private var readGeneration = 0
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
+    private val exportReport = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? ->
+        if (uri != null) worker.execute {
+            val result = runCatching {
+                val report = CaptureDiagnostics(this).exportJson()
+                requireNotNull(contentResolver.openOutputStream(uri)).bufferedWriter(Charsets.UTF_8).use { it.write(report) }
+            }
+            main.post { if (!isFinishing && !isDestroyed) ui.feedback(body,
+                if (result.isSuccess) "诊断报告已导出" else "诊断导出失败，请重新选择保存位置") }
+        }
+    }
     private val refreshStatus = object : Runnable {
         override fun run() { updateStatus(); main.postDelayed(this, 1500) }
     }
@@ -137,6 +149,9 @@ class CaptureActivity : AppCompatActivity() {
         body.addView(ui.button("无障碍设置", R.drawable.ag_eye, false) {
             runCatching { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }.onFailure { ui.feedback(body, "系统页面不可用") }
         }.apply { layoutParams = ui.lp(8) })
+        body.addView(ui.button("导出诊断报告", R.drawable.ag_save, false) {
+            exportReport.launch("touxian-diagnostics-${SimpleDateFormat("yyyyMMdd-HHmm", Locale.CHINA).format(Date())}.json")
+        }.apply { layoutParams = ui.lp(8) })
         body.addView(ui.toggle("本机 OCR 兜底", Prefs(this).localOcrEnabled).apply {
             var updating = false
             setOnCheckedChangeListener { _, checked ->
@@ -177,6 +192,8 @@ class CaptureActivity : AppCompatActivity() {
             R.drawable.ag_messages_square
         ).apply { layoutParams = ui.lp(6) })
         diagnosticPanel.addView(ui.statusRow("最近落盘", snapshot.savedAt?.let(::formatDiagnosticTime) ?: "尚未保存", ui.sub, R.drawable.ag_save).apply { layoutParams = ui.lp(6) })
+        diagnosticPanel.addView(ui.statusRow("事件写入", diagnostics.eventStorageLabel(), ui.brand, R.drawable.ag_notebook_tabs).apply { layoutParams = ui.lp(6) })
+        diagnosticPanel.addView(ui.statusRow("页面说明", diagnostics.explanation(), ui.sub, R.drawable.ag_circle_alert).apply { layoutParams = ui.lp(6) })
         diagnosticPanel.addView(ui.statusRow("悬浮窗", snapshot.overlayResult, ui.sub, R.drawable.ag_radio).apply { layoutParams = ui.lp(6) })
         diagnosticPanel.addView(ui.statusRow("保活通知", snapshot.keepAlive, ui.sub, R.drawable.ag_clock_3).apply { layoutParams = ui.lp(6) })
         diagnosticPanel.addView(ui.callout(

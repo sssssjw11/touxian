@@ -32,10 +32,12 @@
         <activity
             android:name=".SettingsActivity"
             android:exported="false" />
+        <activity android:name=".MessageKeywordActivity" android:exported="false" />
 
         <activity
             android:name=".CustomIntentActivity"
             android:exported="false" />
+        <activity android:name=".ConversationAnalysisActivity" android:exported="false" />
         <activity
             android:name=".CalendarActivity"
             android:exported="false" />

@@ -15,6 +15,8 @@ import com.google.mlkit.vision.text.TextRecognizer
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import com.attentionguard.app.core.ChatSnapshot
 import com.attentionguard.app.core.Msg
+import java.text.Normalizer
+import kotlin.math.abs
 
 /** Opt-in, local-only fallback restricted to proven, visible text-bubble rectangles. */
 class OnDeviceChatOcr(private val service: AccessibilityService, private val hideOverlay: (Boolean) -> Unit) {
@@ -94,8 +96,9 @@ class OnDeviceChatOcr(private val service: AccessibilityService, private val hid
         }, 250)
     }
 
-    fun readVisibleTitle(stillCurrent: () -> Boolean, done: (String?, String) -> Unit) {
+    fun readVisibleTitle(stillCurrent: () -> Boolean, bounds: Rect? = null, done: (String?, String) -> Unit) {
         cancel()
+        val requestedBounds = bounds?.let(::Rect)
         val request = ++generation
         fun complete(title: String?, reason: String) {
             if (request != generation) return
@@ -119,16 +122,15 @@ class OnDeviceChatOcr(private val service: AccessibilityService, private val hid
                             val hardware = Bitmap.wrapHardwareBuffer(buffer, result.colorSpace)
                             try { hardware?.copy(Bitmap.Config.ARGB_8888, false) } finally { hardware?.recycle() }
                         } catch (_: Exception) { null } finally { buffer.close() }
-                        hideOverlay(false)
+                        if (request == generation) hideOverlay(false)
                         if (bitmap == null) { complete(null, "标题画面不可用"); return }
                         if (request != generation || !stillCurrent()) { bitmap.recycle(); complete(null, "会话已变化"); return }
-                        val insets = service.getSystemService(WindowManager::class.java).currentWindowMetrics.windowInsets
-                            .getInsetsIgnoringVisibility(WindowInsets.Type.statusBars())
-                        val top = insets.top.coerceIn(0, bitmap.height - 1)
-                        val bounds = Rect((bitmap.width * .17f).toInt(), top, (bitmap.width * .86f).toInt(),
-                            (top + 72 * service.resources.displayMetrics.density).toInt().coerceAtMost(bitmap.height))
-                        if (bounds.isEmpty) { bitmap.recycle(); complete(null, "标题区域不可用"); return }
-                        val crop = Bitmap.createBitmap(bitmap, bounds.left, bounds.top, bounds.width(), bounds.height())
+                        val statusBarTop = if (requestedBounds == null) service.getSystemService(WindowManager::class.java)
+                            .currentWindowMetrics.windowInsets.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top else 0
+                        val cropBounds = titleCropBounds(bitmap.width, bitmap.height, statusBarTop,
+                            service.resources.displayMetrics.density, requestedBounds)
+                        if (cropBounds == null) { bitmap.recycle(); complete(null, "标题区域不可用"); return }
+                        val crop = Bitmap.createBitmap(bitmap, cropBounds.left, cropBounds.top, cropBounds.width(), cropBounds.height())
                         bitmap.recycle()
                         runCatching {
                             val engine = recognizer ?: TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build()).also { recognizer = it }
@@ -136,9 +138,10 @@ class OnDeviceChatOcr(private val service: AccessibilityService, private val hid
                                 .addOnSuccessListener(service.mainExecutor) { recognized ->
                                     val lines = recognized.textBlocks.flatMap { it.lines }
                                         .filter { it.boundingBox?.centerY()?.let { y -> y < crop.height * .88 } ?: true }
-                                        .map { it.text.trim() }.filter { it.isNotEmpty() && it.length <= 120 }
-                                    val title = lines.filterNot { it.contains('…') || it.contains("...") }
-                                        .ifEmpty { lines }.maxByOrNull { it.length }
+                                        .mapNotNull { line -> line.boundingBox?.let {
+                                            OcrTitleLine(line.text, it.left, it.top, it.right, it.bottom)
+                                        } }
+                                    val title = WeChatTitleText.select(lines)
                                     crop.recycle()
                                     complete(title, if (title == null) "标题未能自动识别" else "本机标题识别完成")
                                 }.addOnFailureListener(service.mainExecutor) {
@@ -157,8 +160,60 @@ class OnDeviceChatOcr(private val service: AccessibilityService, private val hid
 
     companion object {
         private const val INTERVAL = 8000L
+        internal fun titleCropBounds(width: Int, height: Int, statusBarTop: Int, density: Float, requested: Rect?): Rect? {
+            if (width <= 0 || height <= 0) return null
+            val top = statusBarTop.coerceIn(0, height - 1)
+            val region = requested?.let(::Rect) ?: Rect((width * .17f).toInt(), top, (width * .86f).toInt(),
+                (top + (56 * density).toInt().coerceAtLeast(1)).coerceAtMost(height))
+            return region.takeIf { it.intersect(Rect(0, 0, width, height)) && !it.isEmpty }
+        }
         fun eligible(inspection: ChatInspection) = !inspection.snapshot?.title.isNullOrBlank() &&
             inspection.snapshot?.messages?.isEmpty() == true && inspection.knownBubbles > 0 &&
             inspection.ocrRegions.size in 1..30 && inspection.ocrRegions.all { !it.bounds.isEmpty }
     }
+}
+
+internal data class OcrTitleLine(val text: String, val left: Int, val top: Int, val right: Int, val bottom: Int)
+
+/** OCR may split a mixed-script title into several blocks on the same baseline. */
+internal object WeChatTitleText {
+    private val navigation = Regex("^(?:返回|微信|聊天信息|更多|搜索)(?:\\s*\\(\\s*\\d{1,5}\\s*\\))?$")
+    private val digits = Regex("^[\\d\\s()]+$")
+
+    fun select(lines: List<OcrTitleLine>): String? {
+        val rows = mutableListOf<MutableList<OcrTitleLine>>()
+        for (line in lines.filter { it.text.isNotBlank() && it.right > it.left && it.bottom > it.top }
+            .sortedWith(compareBy<OcrTitleLine> { it.top }.thenBy { it.left })) {
+            val row = rows.lastOrNull()
+            val sameRow = row?.any {
+                val overlap = minOf(it.bottom, line.bottom) - maxOf(it.top, line.top)
+                overlap >= minOf(it.bottom - it.top, line.bottom - line.top) * .5 ||
+                    abs((it.top + it.bottom) - (line.top + line.bottom)) <= maxOf(it.bottom - it.top, line.bottom - line.top) * .6
+            } == true
+            if (sameRow) row!!.add(line) else rows.add(mutableListOf(line))
+        }
+        for (row in rows) {
+            if (row.any { WeChatAdapter.isTruncatedTitle(it.text) }) continue
+            val parts = row.sortedBy { it.left }.map { it to normalize(it.text) }.filter { it.second.isNotBlank() }
+            val value = buildString {
+                parts.forEachIndexed { index, (line, text) ->
+                    if (index > 0) {
+                        val (previous, prefix) = parts[index - 1]
+                        val gap = line.left - previous.right
+                        val characterHeight = minOf(line.bottom - line.top, previous.bottom - previous.top)
+                        if (prefix.last().isAsciiWord() && text.first().isAsciiWord() && gap > 0 &&
+                            gap >= characterHeight * .2) append(' ')
+                    }
+                    append(text)
+                }
+            }.trim()
+            if (value.isNotBlank() && value.length <= 120 && !isNoise(value) && !WeChatAdapter.isTruncatedTitle(value)) return value
+        }
+        return null
+    }
+
+    private fun normalize(value: String) = Normalizer.normalize(value, Normalizer.Form.NFKC).trim()
+    private fun Char.isAsciiWord(): Boolean = this in 'a'..'z' || this in 'A'..'Z' || this in '0'..'9'
+    private fun isNoise(value: String): Boolean = value.isBlank() || navigation.matches(value) ||
+        digits.matches(value) || ChatDateParser.parse(value) != null
 }

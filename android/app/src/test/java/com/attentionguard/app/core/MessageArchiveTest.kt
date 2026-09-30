@@ -119,6 +119,59 @@ class MessageArchiveTest {
         assertEquals(2, archive.append(page, "live").added)
     }
 
+    @Test fun recordingIsScopedAndMessagesUseTheirDateNotCaptureTime() {
+        archive.createRecording(ChatRecording("recording", "group", 1))
+        val precise = 1_780_000_000_000L
+        archive.append(ChatSnapshot("group", listOf(Msg("me", "inside", timestamp = precise, date = "2026-09-15"),
+            Msg("other", "unknown"), Msg("other", "outside", date = "2026-09-01"))), "recording", requireRecording = true)
+        val range = HistoryRange(LocalDate.of(2026, 9, 10), LocalDate.of(2026, 9, 20))
+        assertEquals(listOf("inside"), archive.recordingMessages("recording", range, false).map { it.message.text })
+        assertEquals(2, archive.recordingMessages("recording", range, true).size)
+        assertEquals(precise, archive.recordingMessages("recording").first().message.timestamp)
+        assertEquals(0, archive.append(ChatSnapshot("another", messages("bad")), "recording", requireRecording = true).added)
+    }
+
+    @Test fun stoppingDeletingAndReopeningCannotResurrectARecording() {
+        val recording = ChatRecording("recording", "group", 1)
+        archive.createRecording(recording)
+        archive.append(screen("one"), recording.id, requireRecording = true)
+        archive.updateRecording(recording.copy(state = RecordingState.FINISHED))
+        assertEquals(0, archive.append(screen("two"), recording.id, requireRecording = true).added)
+        archive.deleteRecording(recording.id)
+        archive.updateRecording(recording.copy(state = RecordingState.ACTIVE))
+        assertNull(archive.recording(recording.id))
+        assertEquals(0, archive.append(screen("three"), recording.id, requireRecording = true).added)
+        assertEquals(0, archive.count(recording.id).total)
+    }
+
+    @Test fun equalTextAtDifferentKnownTimesIsNotTheSameMessage() {
+        val early = messages("到了吗", "到了").map { it.copy(date = "2026-09-30", timeLabel = "10:00") }
+        val late = early.map { it.copy(timeLabel = "11:00") }
+        archive.append(ChatSnapshot("group", early), "live")
+        assertEquals(2, archive.append(ChatSnapshot("group", late), "live").added)
+        assertEquals(4, archive.count("live").total)
+    }
+
+    @Test fun recordingIdentityDoesNotUseLooseKeywordNormalization() {
+        archive.createRecording(ChatRecording("recording", "A-B", 1))
+        assertEquals(0, archive.append(ChatSnapshot("AB", messages("not this chat")), "recording", requireRecording = true).added)
+        assertFalse(ConversationIdentity.sameTitle("张 三", "张三"))
+        assertFalse(ConversationIdentity.sameTitle("AB", "ab"))
+        assertTrue(ConversationIdentity.sameTitle("讨论组（30）", "讨论组(31)"))
+    }
+
+    @Test fun newMessagesInvalidateAStoredAnalysisAndReconnectionRequiresConfirmation() {
+        val recording = ChatRecording("recording", "group", 1)
+        archive.createRecording(recording)
+        archive.append(screen("one", "two"), recording.id, requireRecording = true)
+        archive.saveRecordingAnalysis(recording.id, "report")
+        archive.append(screen("one", "two", "three"), recording.id, requireRecording = true)
+        assertNull(archive.recordingAnalysis(recording.id))
+        archive.interruptRecordings()
+        assertEquals(RecordingState.PAUSED, archive.recording(recording.id)?.state)
+        assertEquals(3, archive.count(recording.id).total)
+    }
+
     @Test fun versionOneDatabaseUpgradePreservesMessages() {
         val path = context.getDatabasePath("message_archive.db")
         path.parentFile!!.mkdirs()

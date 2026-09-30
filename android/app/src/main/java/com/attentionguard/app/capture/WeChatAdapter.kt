@@ -12,7 +12,8 @@ data class ChatInspection(
     val snapshot: ChatSnapshot?, val nodeCount: Int, val knownBubbles: Int,
     val structuralBubbles: Int, val reason: String,
     val scrollTarget: AccessibilityNodeInfo? = null,
-    val ocrRegions: List<ChatOcrRegion> = emptyList()
+    val ocrRegions: List<ChatOcrRegion> = emptyList(),
+    val titleBounds: Rect? = null
 )
 
 data class ChatOcrRegion(val bounds: Rect, val side: String, val date: String?, val timeLabel: String?)
@@ -135,6 +136,7 @@ class WeChatAdapter {
             e.visible && !e.blocked && e.node.viewIdResourceName in ACTION_BAR_IDS &&
                 e.bounds.top <= viewport.top + (24 * density).toInt() + 160
         }.maxByOrNull { it.bounds.bottom - it.bounds.top }
+        val actionBarIndex = actionBar?.let(entries::indexOf)
         val actionBarTop = actionBar?.bounds?.top ?: viewport.top
         val actionBarBottom = actionBar?.bounds?.bottom ?: titleLimit
 
@@ -153,8 +155,11 @@ class WeChatAdapter {
             e.visible && !e.blocked && e.node.viewIdResourceName in TITLE_IDS &&
                 text.isNotEmpty() && text.length <= 120 &&
                 ChatDateParser.parse(text) == null && selected.none { inside(index, it) } &&
+                lists.none { inside(index, it) } &&
+                (e.node.viewIdResourceName == "com.tencent.mm:id/obn" || actionBarIndex == null || inside(index, actionBarIndex)) &&
                 e.bounds.top >= actionBarTop && e.bounds.bottom <= actionBarBottom
-        }.maxWithOrNull(compareBy<Entry> { it.bounds.top }.thenByDescending { it.bounds.width() })
+        }.minWithOrNull(compareBy<Entry> { if (it.node.viewIdResourceName == "com.tencent.mm:id/obn") 0 else 1 }
+            .thenBy { it.bounds.top }.thenByDescending { it.bounds.width() })
 
         val titleEntry = exactTitleEntry ?: entries.filterIndexed { index, e ->
             val text = textValue(e)
@@ -162,6 +167,9 @@ class WeChatAdapter {
                 ChatDateParser.parse(text) == null &&
                 text !in listOf("返回", "微信", "搜索", "聊天信息", "更多") &&
                 !isPromotionalLabel(text) && selected.none { inside(index, it) } &&
+                lists.none { inside(index, it) } &&
+                (actionBarIndex == null || inside(index, actionBarIndex)) &&
+                !(e.node.text.isNullOrBlank() && text.contains("头像")) &&
                 e.bounds.top >= actionBarTop && e.bounds.bottom <= actionBarBottom &&
                 e.bounds.centerX() in (viewport.left + viewport.width() / 4)..(viewport.right - viewport.width() / 5)
         }.minWithOrNull(compareBy<Entry> { it.bounds.top }.thenByDescending { it.bounds.width() })
@@ -223,7 +231,12 @@ class WeChatAdapter {
             if (!rect.intersect(viewport)) null else ChatOcrRegion(rect,
                 if (rect.left - viewport.left > viewport.right - rect.right) "me" else "other", stamp?.day?.toString(), stamp?.label)
         }.sortedBy { it.bounds.top }
-        return ChatInspection(ChatSnapshot(title, messages, pkg), entries.size, known.size, structural.coerceAtLeast(0), reason, scroll, ocrRegions)
+        val titleBounds = actionBar?.bounds?.let { bar ->
+            val center = Rect(viewport.left + (viewport.width() * .17f).toInt(), viewport.top,
+                viewport.left + (viewport.width() * .86f).toInt(), viewport.bottom)
+            Rect(bar).takeIf { it.intersect(center) && !it.isEmpty }
+        }
+        return ChatInspection(ChatSnapshot(title, messages, pkg), entries.size, known.size, structural.coerceAtLeast(0), reason, scroll, ocrRegions, titleBounds)
     }
 
     companion object {

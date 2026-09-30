@@ -90,7 +90,7 @@ class DeepSeekAttentionClient internal constructor(
 
     private fun clean(value: String): String = value.trim().takeUnless { it == "null" }.orEmpty()
 
-    private fun postJson(system: String, user: String): JSONObject {
+    internal fun postJson(system: String, user: String, maxTokens: Int = 700, validateEvent: Boolean = true): JSONObject {
         val messages = JSONArray()
             .put(JSONObject().put("role", "system").put("content", system))
             .put(JSONObject().put("role", "user").put("content", user))
@@ -100,7 +100,7 @@ class DeepSeekAttentionClient internal constructor(
             .put("thinking", JSONObject().put("type", "disabled"))
             .put("response_format", JSONObject().put("type", "json_object"))
             .put("temperature", 0.1)
-            .put("max_tokens", 700)
+            .put("max_tokens", maxTokens)
         checkActive()
         var connection: HttpURLConnection? = null
         try {
@@ -133,7 +133,7 @@ class DeepSeekAttentionClient internal constructor(
                 response.toString()
             }
             checkActive()
-            return parseResponse(text)
+            return parseResponse(text, validateEvent)
         } finally {
             connection?.disconnect()
             activeConnection = null
@@ -144,13 +144,14 @@ class DeepSeekAttentionClient internal constructor(
         check(!cancelled && !Thread.currentThread().isInterrupted) { "cancelled" }
     }
 
-    private fun parseResponse(text: String): JSONObject {
+    private fun parseResponse(text: String, validateEvent: Boolean = true): JSONObject {
         try {
             val choice = JSONObject(text).getJSONArray("choices").getJSONObject(0)
             require(choice.getString("finish_reason") == "stop")
             val content = choice.getJSONObject("message").get("content")
             require(content is String && content.isNotBlank())
             return parseObject(content).also { result ->
+                if (!validateEvent) return@also
                 val limits = mapOf("title" to 160, "summary" to 2000, "category" to 32,
                     "priority" to 2, "status" to 32, "due_label" to 160, "action_label" to 500,
                     "consequence" to 1000, "source_person" to 160)

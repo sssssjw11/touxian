@@ -116,6 +116,11 @@ object GuardMotion {
     }
 
     fun bindPress(view: View) {
+        if (!ValueAnimator.areAnimatorsEnabled()) {
+            view.stateListAnimator = null
+            view.scaleX = 1f; view.scaleY = 1f
+            return
+        }
         fun scale(to: Float, time: Long) = AnimatorSet().apply {
             playTogether(ObjectAnimator.ofFloat(view, View.SCALE_X, to), ObjectAnimator.ofFloat(view, View.SCALE_Y, to))
             duration = time

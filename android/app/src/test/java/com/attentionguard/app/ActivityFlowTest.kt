@@ -42,6 +42,19 @@ class ActivityFlowTest {
         } finally { controller.pause().stop().destroy() }
     }
 
+    @Test fun aLateCommitUpdatesTheAlreadyOpenAppWithoutReopeningIt() {
+        val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
+        try {
+            val activity = controller.get()
+            assertTrue(texts(activity).contains("记录本还是空的"))
+            val event = DemoAttentionData.events.first().copy(id = "late-commit")
+            EventStore(context).upsert(event)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertTrue(texts(activity).contains(event.title))
+            assertFalse(texts(activity).contains("记录本还是空的"))
+        } finally { controller.pause().stop().destroy() }
+    }
+
     @Test fun realEventCanBeCompletedRestoredAndReopened() {
         val event = DemoAttentionData.events[2].copy(id = "test-event")
         EventStore(context).upsert(event)

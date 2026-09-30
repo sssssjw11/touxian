@@ -1,7 +1,7 @@
 package com.attentionguard.app.capture
 
 import com.attentionguard.app.core.ChatSnapshot
-import com.attentionguard.app.core.ConversationScope
+import com.attentionguard.app.core.ConversationIdentity
 import com.attentionguard.app.core.MessageType
 import com.attentionguard.app.core.ScreenOverlap
 
@@ -10,6 +10,7 @@ internal class PinnedChatTitle(val title: String, initialWindowId: Int, initial:
     private var visible = initial
     private var lastWindowId = initialWindowId
     private var misses = 0
+    private val unmatchedScreens = mutableSetOf<String>()
     private var continuous = true
 
     fun pauseContinuity() { continuous = false }
@@ -17,17 +18,19 @@ internal class PinnedChatTitle(val title: String, initialWindowId: Int, initial:
     fun resolve(snapshot: ChatSnapshot, currentWindowId: Int): ChatSnapshot? {
         if (shouldExpire()) return null
         if (snapshot.sourcePackage != "com.tencent.mm" ||
-            (!snapshot.title.isNullOrBlank() && !ConversationScope.equivalent(title, snapshot.title))) {
+            (!snapshot.title.isNullOrBlank() && !ConversationIdentity.sameTitle(title, snapshot.title))) {
             misses = 3
             return null
         }
         if (snapshot.messages.isEmpty()) { pauseContinuity(); return null }
         if (!matchesMessages(visible, snapshot, continuous && currentWindowId == lastWindowId)) {
             pauseContinuity()
-            misses++
+            // Re-reading one blocked viewport is not a new failed transition.
+            if (unmatchedScreens.add(snapshot.messagesSignature())) misses++
             return null
         }
         misses = 0
+        unmatchedScreens.clear()
         continuous = true
         lastWindowId = currentWindowId
         visible = snapshot

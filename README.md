@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/sssssjw11/touxian/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/sssssjw11/touxian?style=social"></a>
   <a href="https://github.com/sssssjw11/touxian/commits/main"><img alt="Latest commit" src="https://img.shields.io/github/last-commit/sssssjw11/touxian"></a>
-  <a href="https://github.com/sssssjw11/attention-guard/releases/tag/v1.22"><img alt="Android version" src="https://img.shields.io/badge/Android-1.22_preview-136B5A"></a>
+  <a href="https://github.com/sssssjw11/touxian/releases/tag/android-v1.25"><img alt="Android version" src="https://img.shields.io/badge/Android-1.25_preview-136B5A"></a>
   <img alt="Android 11+" src="https://img.shields.io/badge/Android-11%2B-3DDC84?logo=android&logoColor=white">
   <img alt="MIT License" src="https://img.shields.io/badge/license-MIT-315DA8">
 </p>
@@ -29,7 +29,9 @@
 > 这是一个**双端发布总仓库**：`desktop/` 是偷闲桌面端，`android/` 是偷闲 Android 端。两端共享产品方向，但各自独立运行、独立保存数据、独立发版。
 
 > [!WARNING]
-> 当前 Android 发布包是 **1.22 预览版 / versionCode 23 / debug 签名**；桌面端当前提供本地 Web 工作台，仓库暂未提供独立的 Windows `.exe` 安装包。重要期限和行动请始终回到原始消息核对。
+> 当前 Android 发布包是 **1.25 预览版 / versionCode 26 / debug 签名**；桌面端当前提供本地 Web 工作台，仓库暂未提供独立的 Windows `.exe` 安装包。重要期限和行动请始终回到原始消息核对。
+
+Android 1.25 同步来源 `attention-guard@8145646`，带来消息正文关键词、单会话记录、关系深度分析、诊断导出与滑动标题恢复。参见 [本次 Release](releases/android-v1.25.md) 和 [完整更新与 Debug 记录](android/docs/releases/v1.25.md)。桌面端本次未改动，两端数据不会自动互通。
 
 ---
 
@@ -80,6 +82,9 @@
 | 微信悬浮窗 | — | ✅ |
 | 意图与语境分析 | Jev / DeepSeek 可选 | 本地规则 |
 | 自由文本分析 | — | ✅ |
+| 自定义消息正文关键词 | — | 类型 / 重要性 / 启停 |
+| 单会话记录与深度分析 | — | 消息日期 / 统计 / 原话证据 |
+| 诊断报告导出 | — | 结构化 JSON |
 | 确认后写入日历 | 邮件摘要 | ✅ |
 | 学院来源拖动排序 / 置顶 | ✅ | — |
 
@@ -116,6 +121,10 @@
 - 🔎 **有界历史回溯**：用户主动启动，受会话、翻页、时间和次数限制。
 - 🛠️ **运行诊断**：查看可读消息数、采集连接、悬浮窗和保活状态。
 - 🌐 **可选联网增强**：DeepSeek 事件增强默认关闭，本地规则可独立工作。
+- **正文关键词**：手动添加识别关键词，选择类型和 P0–P3 重要性；与会话范围分开，命中依据写入详情。
+- **单会话记录**：意图模式显式开始后才记录当前可见消息，切换页面或锁屏暂停，不后台扫描聊天历史。
+- **关系深度分析**：APP 按消息日期选择范围，分开全量统计、关键语境与原话证据；可单独确认 DeepSeek 深化。
+- **诊断导出**：区分标题读取、范围、模式、判定、写入与筛选，不导出聊天正文、会话名或密钥。
 
 ## 🚀 快速开始
 
@@ -125,17 +134,19 @@
 
 | 下载项 | 地址 |
 | --- | --- |
-| Android APK · 1.22 预览版 | [touxian-1.22-debug.apk](https://github.com/sssssjw11/attention-guard/releases/download/v1.22/touxian-1.22-debug.apk) |
-| SHA-256 校验文件 | [touxian-1.22-debug.apk.sha256](https://github.com/sssssjw11/attention-guard/releases/download/v1.22/touxian-1.22-debug.apk.sha256) |
-| 发布页 | [Android v1.22](https://github.com/sssssjw11/attention-guard/releases/tag/v1.22) |
+| Android APK · 1.25 预览版 | [touxian-1.25-debug.apk](https://github.com/sssssjw11/touxian/releases/download/android-v1.25/touxian-1.25-debug.apk) |
+| SHA-256 校验文件 | [touxian-1.25-debug.apk.sha256](https://github.com/sssssjw11/touxian/releases/download/android-v1.25/touxian-1.25-debug.apk.sha256) |
+| 发布页 | [Android v1.25](https://github.com/sssssjw11/touxian/releases/tag/android-v1.25) |
 
 ADB 安装：
 
 ```bash
-adb install -r touxian-1.22-debug.apk
+adb install -r touxian-1.25-debug.apk
 ```
 
 > 当前 APK 使用 debug 签名。遇到“签名不一致”时不要直接卸载旧应用，先确认本地事件、消息、密钥和设置的保留方案。
+
+1.22 升级到 1.25 会将消息库从版本 2 迁移到 3，保留旧消息并补充录制及时间字段；没有旧版降级迁移，不建议运行新版本后直接装回旧版。详情见 [升级提醒](releases/android-v1.25.md#upgrade)。
 
 ### 方式二：启动桌面端
 
@@ -266,10 +277,14 @@ Android 端完整说明在 [`android/README.md`](android/README.md)，这里给�
 | 模式 | 读取什么 | 会保存什么 |
 | --- | --- | --- |
 | 🎯 事件监测 | 当前可见微信会话 | 消息和符合条件的事件 |
-| 💬 意图分析 | 当前屏幕可读语境 | 展示结果，不生成事件 |
+| 💬 意图分析 | 当前屏幕可读语境 | 默认只展示；显式开始才记录消息，手动保存事项才写事件 |
 | 📝 自由文本分析 | 你主动输入或粘贴的文字 | 展示结果，不写入事件簿 |
 
 > 识别词条为空表示不按会话名称限制范围，不等于自动遍历全部会话。历史回溯必须由用户主动启动，并受速度、屏数和时间上限约束。
+
+消息关键词入口：微信「事件监测 → 更多 → 消息关键词」或 APP「规则与外观 → 消息正文关键词」。会话词条限制看哪个聊天，正文规则决定整理哪些消息；删除规则不会删除既有事件。
+
+会话记录入口：微信意图模式的保存图标；APP「会话分析」查看片段和日期范围报告。意图模式更多菜单的「保存当前事项」是另一项独立命令。遇到识别后没有入库，在「采集与回溯 → 诊断 → 导出诊断报告」收集阶段信息。
 
 ## 🧠 判断与架构
 
@@ -308,7 +323,7 @@ P0–P3、截止状态、证据和归档
 用户确认后写入
 ```
 
-Android 端不读取微信数据库、不 hook 微信、不自动发送消息，也不把意图模式内容写进事件簿。
+Android 端不读取微信数据库、不 hook 微信、不自动发送消息。意图模式不自动写事件簿，显式会话记录和手动保存事项分别受用户控制。
 
 ## 🧱 技术栈
 
@@ -352,11 +367,17 @@ cd android
 
 Android 原仓库保留了版本化测试记录和真机验收记录：
 
+- [1.25 更新与 Debug](android/docs/releases/v1.25.md)
+- [1.25 正文关键词](android/docs/iteration-1.25.md)
+- [1.24 标题恢复排查](android/docs/iteration-1.24.md)
+- [1.23 记录与关系分析](android/docs/iteration-1.23.md)
 - [1.22 迭代说明](android/docs/iteration-1.22.md)
 - [1.22 发布说明](android/docs/releases/v1.22.md)
 - [真机验收](android/docs/device-acceptance-1.22.md)
 
 如果当前机器没有 Android SDK，Gradle 会在配置阶段停止；这属于本机构建环境问题，不代表源码测试失败。
+
+1.25 来源发布前有 296 项针对性回归通过；总仓库同步验证见 [发布记录](RELEASE.md)。空标题真实 OCR 恢复、长时间录制、同名会话及更多机型仍待验收，不能将代码测试当作完整真机覆盖。
 
 ## 🔐 权限、隐私与安全
 
@@ -374,6 +395,7 @@ Android 原仓库保留了版本化测试记录和真机验收记录：
 - 不后台遍历全部微信群，不自动回复，不执行转账、红包或发送操作。
 - OCR 截图只在内存中处理。
 - DeepSeek 联网增强默认关闭。
+- APP 会话深化另需确认，发送所选范围统计与最多 90 条关键消息；微信实时意图分析仍在本地运行。
 - 日历事件只有在用户点击确认后才写入。
 
 请只处理自己有权查看的内容，并遵守微信、Android 和目标网站的适用规则。
@@ -410,6 +432,7 @@ touxian/
 - [x] 已读完、完成归档、超期归档和学院来源置顶。
 - [x] Android 微信可见会话事件监测和三级悬浮窗。
 - [x] Android 观测簿、组合检索、日历确认写入和本地 OCR。
+- [x] Android 正文关键词、单会话记录、关系深度分析与诊断导出。
 - [ ] 总仓库自动同步两个来源仓库。
 - [ ] 桌面端打包独立 Windows 安装包。
 - [ ] Android 扩大机型、微信版本和后台保活验收范围。
@@ -439,7 +462,7 @@ touxian/
 | 平台 | 来源仓库 | 当前同步版本 | 主要产物 |
 | --- | --- | --- | --- |
 | Desktop | [wzu-notice-scraper](https://github.com/sssssjw11/wzu-notice-scraper) | `126b45e` | 本地 Web / FastAPI |
-| Android | [attention-guard](https://github.com/sssssjw11/attention-guard) | `f258b5b` / `1.22` | Debug APK |
+| Android | [attention-guard](https://github.com/sssssjw11/attention-guard) | `8145646` / `1.25` | Debug APK |
 
 总仓库是发布聚合仓库，不自动跟踪来源仓库。更新流程：
 
@@ -468,6 +491,8 @@ touxian/
 ### Android
 
 - [Android 端完整说明](android/README.md)
+- [Android 1.25 Release](releases/android-v1.25.md)
+- [1.25 更新与 Debug](android/docs/releases/v1.25.md)
 - [设计系统](android/DESIGN.md)
 - [交互约定](android/UX-CONTRACT.md)
 - [1.22 发布说明](android/docs/releases/v1.22.md)

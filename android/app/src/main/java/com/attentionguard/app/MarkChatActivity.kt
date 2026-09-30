@@ -60,7 +60,7 @@ class MarkChatActivity : AppCompatActivity() {
     private fun save() {
         field.error = null
         val value = title.text?.toString()?.trim().orEmpty()
-        if (value.isEmpty()) { field.error = "请输入会话名称或关键词"; title.requestFocus(); return }
+        if (value.isEmpty()) { field.error = "请输入当前会话完整名称"; title.requestFocus(); return }
         if (WeChatAdapter.isTruncatedTitle(value)) { field.error = "名称含省略号，请补全当前会话名称"; title.requestFocus(); return }
         runCatching { Prefs(this).addRecognitionTerm(value) }
             .onSuccess { result ->
@@ -74,6 +74,11 @@ class MarkChatActivity : AppCompatActivity() {
                 finish()
             }
             .onFailure { field.error = "保存失败，请重试" }
+    }
+
+    override fun onDestroy() {
+        if (isFinishing) CaptureRuntime.actions?.cancelCurrentTitle()
+        super.onDestroy()
     }
 
     companion object {

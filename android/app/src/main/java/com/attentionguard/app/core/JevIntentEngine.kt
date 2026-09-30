@@ -65,7 +65,7 @@ object JevIntentEngine {
     private val questionOpening = Regex("^(请问|为什么|怎么|如何|能否|是否)")
     private val vagueReference = Regex("^(这|那|这个|那个|这样|那样|可以吗|行吗|好[的吧]?|嗯|哦)")
     private val relationCue = Regex("在乎我|关心我|还爱|想我|是不是不想|是不是忘|还记得|喜欢你|想见你")
-    private val careCue = Regex("担心你|辛苦了|注意休息|别太累|还好吗|有没有事|陪你|照顾好|支持你|站你这边|我陪你|抱抱|心疼|安慰|相信你")
+    private val careCue = Regex("担心你|辛苦了|注意休息|别太累|还好吗|有没有事|陪你|照顾好|支持你|站你这边|我陪你|抱抱|心疼|安慰|相信你|别生气|不要生气|别难过|不要难过|别担心|不要担心|别怕|不是你的错")
     private val positiveCue = Regex("谢谢|感谢|开心|高兴|期待|太好了|哈哈|恭喜|(?<!不)喜欢|好棒|可爱|支持你|站你这边|相信你|抱抱|心疼|😊|🙂|😄|🥰")
     private val playfulCue = Regex(
         "笑死|乐死|臭乐乐|逗你|开玩笑|调侃|哈哈|呵呵|😂|🤣|😆|😹|😜|😝|" +
@@ -87,6 +87,10 @@ object JevIntentEngine {
     private val hedge = Regex("可能|也许|或许|有点|有些|似乎|大概|不一定|再看看")
     private val intensifier = Regex("特别|太|非常|真的|极其|好\\.\\.\\.|！！|!!")
     private val softener = Regex("有点|有些|稍微|嗯|哦|哈哈")
+    private val negationBeforeCue = Regex("(?:不|没|没有|不会|并不|不是|并没有|不再|从不|别|不要|不用|无需)(?:很|太|那么|特别|非常|真的)?$")
+    private val quotedSpeech = Regex("“[^”]*”|「[^」]*」|\"[^\"]*\"")
+    private val thirdPersonReport = Regex("^(?:他|她|他们|她们|朋友|同事|同学)(?:说|觉得|感觉|很|特别|非常|真的)|(?:他|她)(?:说|问)[：:]")
+    private val emotionInquiry = Regex("^(?:你|您|他|她).{0,12}(?:生气|难过|伤心|不开心|开心|害怕|焦虑).{0,4}(?:吗|么|\\?|？)$")
     private val affectPatterns = listOf(
         Triple("关系确认", relationCue, 18 to 82),
         Triple("关切", careCue, 62 to 68),
@@ -134,10 +138,12 @@ object JevIntentEngine {
 
     private fun classify(text: String, sender: String, group: String, capturedAt: Long, sourceLabel: String,
                          before: List<Turn>, after: List<Turn>): IntentInsight {
-        val activeBefore = before.drop(before.indexOfLast { it.side == "other" && closing.containsMatchIn(it.text) } + 1)
+        val activeBefore = before.drop(before.indexOfLast {
+            sameCounterpart(it, sender) && (closing.containsMatchIn(it.text) || NoticeRules.isCompleted(it.text)) &&
+                !NoticeRules.hasIntentAction(it.text) && !NoticeRules.isReported(it.text)
+        } + 1)
         val priorRequestIndex = activeBefore.indexOfLast {
-            it.side == "other" && action.containsMatchIn(it.text) &&
-                (it.sender == null || it.sender == sender) &&
+            sameCounterpart(it, sender) && NoticeRules.hasIntentAction(it.text) &&
                 !closing.containsMatchIn(it.text) && !systemNotice.containsMatchIn(it.text)
         }
         val priorRequest = activeBefore.getOrNull(priorRequestIndex)
@@ -146,16 +152,21 @@ object JevIntentEngine {
             !action.containsMatchIn(text)
         val visible = before + Turn("other", text) + after
         val meetingContext = NoticeRules.meeting.containsMatchIn(text) &&
-            activeBefore.any { it.side == "other" && (it.sender == null || it.sender == sender) &&
+            activeBefore.any { sameCounterpart(it, sender) &&
                 NoticeRules.meeting.containsMatchIn(it.text) && timePressure.containsMatchIn(it.text) }
-        val contextualAction = NoticeRules.hasAction(text) ||
-            (!NoticeRules.isInformation(text) && action.containsMatchIn(text) && !NoticeRules.isCancelled(text))
+        val contextualAction = NoticeRules.hasIntentAction(text) ||
+            (meetingContext && meetingAction.containsMatchIn(text) && !NoticeRules.isCancelled(text) &&
+                !NoticeRules.isCompleted(text) && !isQuestion(text))
+        val directText = ownAffectText(text)
+        val directEmotion = !emotionInquiry.matches(text) &&
+            emotion.findAll(directText).any { !isNegated(directText, it.range.first) }
         val result = when {
             systemNotice.containsMatchIn(text) -> Result(Kind.SYSTEM, "微信系统提示", "无需立即处理；以实际聊天内容为准。", IntentImportance.LOW)
-            (closing.containsMatchIn(text) && !NoticeRules.hasAction(text) && !NoticeRules.isInformation(text)) ->
+            ((closing.containsMatchIn(text) || NoticeRules.isCompleted(text)) && !NoticeRules.isReported(text) &&
+                !NoticeRules.hasIntentAction(text) && !NoticeRules.isInformation(text)) ->
                 Result(Kind.CLOSING, "话题可能已结束", "核对上下文，不自动关闭已有事项。", IntentImportance.LOW)
             reassurance.containsMatchIn(text) -> Result(Kind.REASSURANCE, "可能在确认关系或关注", "先回应对方关切，再决定是否解释具体问题。", IntentImportance.MEDIUM)
-            emotion.containsMatchIn(text) -> Result(Kind.EMOTION, "可能在表达情绪", "先确认对方感受，不急于给出结论。", IntentImportance.MEDIUM)
+            directEmotion -> Result(Kind.EMOTION, "可能在表达情绪", "先确认对方感受，不急于给出结论。", IntentImportance.MEDIUM)
             followUp -> Result(Kind.FOLLOW_UP, "可能在跟进先前请求", "结合上文核对所指事项和期限，再决定是否处理。",
                 if (timePressure.containsMatchIn(text) || timePressure.containsMatchIn(priorRequest?.text.orEmpty())) IntentImportance.HIGH else IntentImportance.MEDIUM)
             questionOpening.containsMatchIn(text) || isSpokenQuestion(text) -> Result(Kind.QUESTION, "可能在寻求解释", "先核对问题所指，再简明回答。", IntentImportance.MEDIUM)
@@ -167,17 +178,18 @@ object JevIntentEngine {
         }
         val nearby = listOfNotNull(priorRequest, before.lastOrNull(), after.lastOrNull()).distinct()
         val contextEvidence = nearby.take(3).takeIf { it.isNotEmpty() }?.joinToString("；") {
-            "${if (it.side == "me") "我" else "对方"}：${it.text.take(48)}"
+            val person = if (it.side == "me") "我" else if (sameCounterpart(it, sender)) "对方" else it.sender ?: "身份未确认成员"
+            "$person：${it.text.take(48)}"
         }
         val signals = listOfNotNull(
-            "行动".takeIf { visible.any { turn -> action.containsMatchIn(turn.text) } },
+            "行动".takeIf { visible.any { turn -> NoticeRules.hasIntentAction(turn.text) } || contextualAction },
             "时间".takeIf { visible.any { turn -> timePressure.containsMatchIn(turn.text) } },
             "情绪".takeIf { visible.any { turn -> emotion.containsMatchIn(turn.text) } },
             "问答".takeIf { visible.any { turn -> isQuestion(turn.text) } }
         )
         val summary = "${visible.size} 条可读文字" + if (signals.isEmpty()) "" else " · ${signals.joinToString("、") { "${it}线索" }}"
         val adjustedStep = if (after.any { it.side == "me" }) "${result.nextStep} 你已在其后回复，请核对是否仍需行动。" else result.nextStep
-        val confidenceAssessment = confidenceFor(result, text, activeBefore, after, priorRequestIndex)
+        val confidenceAssessment = confidenceFor(result, text, sender, activeBefore, after, priorRequestIndex)
         return IntentInsight(result.label, adjustedStep, text.take(120), sender, group, capturedAt, sourceLabel = sourceLabel,
             importance = result.importance, confidence = confidenceAssessment.score,
             contextEvidence = contextEvidence, contextSummary = summary,
@@ -188,20 +200,26 @@ object JevIntentEngine {
     private fun affectFor(text: String, sender: String, before: List<Turn>, after: List<Turn>): AffectInsight {
         fun collect(value: String): List<AffectCue> {
             if (systemNotice.containsMatchIn(value)) return emptyList()
+            if (emotionInquiry.matches(value)) return listOf(AffectCue("感受询问", value.take(48), 0, 35))
+            val direct = ownAffectText(value)
             val emojiCues = emojiPatterns.flatMap { (kind, pattern, scores) ->
-                pattern.findAll(value).map {
+                pattern.findAll(direct).map {
                     AffectCue(kind, it.value, scores.first, scores.second, symbolic = true)
                 }.toList()
             }.distinctBy { it.phrase }
             // Do not count the word inside [流泪] again as independent text evidence.
-            val words = emojiPatterns.fold(value) { remaining, (_, pattern, _) -> remaining.replace(pattern, " ") }
+            val words = emojiPatterns.fold(direct) { remaining, (_, pattern, _) -> remaining.replace(pattern, " ") }
+            val negativeRanges = negativeCue.findAll(words).filterNot { isNegated(words, it.range.first) }.map { it.range }.toList()
             val multiplier = when {
                 intensifier.containsMatchIn(words) -> 1.2
                 softener.containsMatchIn(words) -> 0.78
                 else -> 1.0
             }
             return emojiCues + affectPatterns.flatMap { (kind, pattern, scores) ->
-                pattern.findAll(words).take(3).map {
+                pattern.findAll(words).filterNot {
+                    kind !in setOf("关切", "贴纸") && (isNegated(words, it.range.first) ||
+                        kind == "积极" && negativeRanges.any { range -> it.range.first in range })
+                }.take(3).map {
                     AffectCue(
                         kind = kind,
                         phrase = it.value,
@@ -217,15 +235,16 @@ object JevIntentEngine {
         // own replies remain context but do not get counted as the counterpart's emotion.
         val contextTurns = before.mapIndexed { index, turn ->
             turn to (before.size - index)
-        }.filter { (turn, _) -> turn.side == "other" && (turn.sender == null || turn.sender == sender) } +
+        }.filter { (turn, _) -> sameCounterpart(turn, sender) } +
             after.mapIndexed { index, turn ->
             turn to (index + 1)
-        }.filter { (turn, _) -> turn.side == "other" && (turn.sender == null || turn.sender == sender) }
+        }.filter { (turn, _) -> sameCounterpart(turn, sender) }
         val context = contextTurns.flatMap { (turn, distance) ->
             collect(turn.text).map { cue ->
                 WeightedAffectCue(cue, exp(-0.34 * distance), false)
             }
-        }.sortedByDescending { it.weight }.take(8)
+        }.filterNot { candidate -> current.any { it.kind == candidate.cue.kind && it.phrase == candidate.cue.phrase } }
+            .sortedByDescending { it.weight }.distinctBy { it.cue.kind to it.cue.phrase }.take(8)
         val weighted = current.map { WeightedAffectCue(it, 1.0, true) } + context
         if (weighted.isEmpty()) {
             val neutralConfidence = (23 + text.count { it.isLetterOrDigit() }.coerceAtMost(18) / 3 +
@@ -241,7 +260,8 @@ object JevIntentEngine {
         val totalWeight = weighted.sumOf { it.weight }.coerceAtLeast(0.01)
         val valence = (weighted.sumOf { it.cue.valence * it.weight } / totalWeight).roundToInt().coerceIn(-100, 100)
         val intensity = (weighted.sumOf { it.cue.intensity * it.weight } / totalWeight).roundToInt().coerceIn(0, 100)
-        val kinds = weighted.map { it.cue.kind }.toSet()
+        val kinds = weighted.filter { current.isEmpty() || it.fromCurrent || it.weight >= 0.25 }
+            .map { it.cue.kind }.toSet()
         val hasPositive = "积极" in kinds || "关切" in kinds || "关系确认" in kinds
         val hasNegative = "攻击" in kinds || "负向" in kinds || "回避" in kinds
         val mixed = hasPositive && hasNegative
@@ -259,6 +279,7 @@ object JevIntentEngine {
             "调侃" in kinds -> "调侃/玩笑倾向"
             "负向" in kinds -> "出现负向情绪"
             "回避" in kinds -> "出现回避或降温"
+            "感受询问" in kinds -> "在询问感受"
             "贴纸" in kinds -> "贴纸情绪线索"
             else -> "积极亲近"
         }
@@ -279,8 +300,9 @@ object JevIntentEngine {
             (if (intensity >= 70) 0.08 else 0.0) -
             ambiguityPenalty
         val confidence = (rawConfidence * 100).roundToInt().coerceIn(32, if (symbolicOnly) 58 else 86)
-        val fromContext = current.isEmpty()
-        val terms = weighted.sortedByDescending { it.weight * it.cue.intensity }
+        val fromContext = current.isEmpty() || current.all { it.kind == "贴纸" } && context.any { it.cue.kind != "贴纸" }
+        val terms = weighted.filter { !fromContext || it.cue.kind != "贴纸" }
+            .sortedByDescending { it.weight * it.cue.intensity }
             .map { it.cue.phrase }.distinct().take(3).joinToString("、") { "“$it”" }
         val basis = buildString {
             append(if (fromContext) "当前消息未命中，引用上文衰减线索" else "当前消息直接命中 $directCount 类线索")
@@ -304,11 +326,13 @@ object JevIntentEngine {
     private fun confidenceFor(
         result: Result,
         text: String,
+        sender: String,
         before: List<Turn>,
         after: List<Turn>,
         priorRequestIndex: Int
     ): ConfidenceAssessment {
         val length = text.count { it.isLetterOrDigit() }
+        val affectText = ownAffectText(text)
         val prior = when (result.kind) {
             Kind.SYSTEM -> 0.84
             Kind.CLOSING -> 0.65
@@ -325,7 +349,8 @@ object JevIntentEngine {
             Kind.SYSTEM -> 0.86
             Kind.CLOSING -> (closing.findAll(text).count() * 0.32 + if (length >= 6) 0.14 else 0.0).coerceAtMost(1.0)
             Kind.REASSURANCE -> (reassurance.findAll(text).count() * 0.38 + if (length >= 8) 0.18 else 0.0).coerceAtMost(1.0)
-            Kind.EMOTION -> (emotion.findAll(text).count() * 0.34 + if (length >= 8) 0.20 else 0.0).coerceAtMost(1.0)
+            Kind.EMOTION -> (emotion.findAll(affectText).count { !isNegated(affectText, it.range.first) } * 0.34 +
+                if (length >= 8) 0.20 else 0.0).coerceAtMost(1.0)
             Kind.FOLLOW_UP -> {
                 (0.28 +
                     (if (timePressure.containsMatchIn(text)) 0.22 else 0.0) +
@@ -349,32 +374,36 @@ object JevIntentEngine {
             Kind.NONE -> (if (length >= 10) 0.20 else 0.0)
         }
 
-        val relevantBefore = before.filter { it.side == "other" && !systemNotice.containsMatchIn(it.text) }
+        val relevantBefore = before.filter { sameCounterpart(it, sender) &&
+            !systemNotice.containsMatchIn(it.text) && !NoticeRules.isReported(it.text) }.distinctBy { it.text }
         val sameKindSupport = relevantBefore.count { turn ->
             when (result.kind) {
-                Kind.ACTION, Kind.FOLLOW_UP -> action.containsMatchIn(turn.text)
+                Kind.ACTION, Kind.FOLLOW_UP -> NoticeRules.hasIntentAction(turn.text)
                 Kind.QUESTION -> isQuestion(turn.text)
-                Kind.EMOTION -> emotion.containsMatchIn(turn.text) || negativeCue.containsMatchIn(turn.text)
+                Kind.EMOTION -> ownAffectText(turn.text).let { value ->
+                    emotion.findAll(value).any { !isNegated(value, it.range.first) } ||
+                        negativeCue.findAll(value).any { !isNegated(value, it.range.first) }
+                }
                 Kind.REASSURANCE -> reassurance.containsMatchIn(turn.text) || careCue.containsMatchIn(turn.text)
                 else -> false
             }
         }
-        val requestRecency = if (priorRequestIndex >= 0) {
+        val requestRecency = if (priorRequestIndex >= 0 && result.kind in setOf(Kind.ACTION, Kind.FOLLOW_UP)) {
             exp(-0.38 * (before.lastIndex - priorRequestIndex).coerceAtLeast(0))
         } else 0.0
         val context = (sameKindSupport * 0.16 + requestRecency * 0.58 +
-            (if (before.lastOrNull()?.side == "other") 0.08 else 0.0) +
+            (if (before.lastOrNull()?.let { sameCounterpart(it, sender) } == true) 0.08 else 0.0) +
             (if (after.any { it.side == "me" }) 0.04 else 0.0)).coerceIn(0.0, 1.0)
         val ambiguity = ((if (length <= 2) 0.26 else if (length <= 4) 0.12 else 0.0) +
             (if (vagueReference.containsMatchIn(text)) 0.18 else 0.0) +
             (if (hedge.containsMatchIn(text)) 0.14 else 0.0) +
             (if (isQuestion(text) && action.containsMatchIn(text)) 0.14 else 0.0) +
             (if (result.kind == Kind.NONE) 0.04 else 0.0)).coerceIn(0.0, 0.9)
-        val visibleTurns = before.size + after.size + 1
+        val visibleTurns = (before + after).count { it.side == "me" || sameCounterpart(it, sender) } + 1
         val dataQuality = (0.42 + visibleTurns.coerceAtMost(7) * 0.07).coerceAtMost(0.95)
         val recencyBoost = if (result.kind == Kind.FOLLOW_UP) requestRecency * 0.08 else context * 0.03
-        val score = (prior * 75 + evidence * 35 + context * 15 + dataQuality * 10 +
-            recencyBoost * 20 - ambiguity * 30).roundToInt().coerceIn(30, 94)
+        val score = (prior * 65 + evidence * 35 + context * 10 + dataQuality * 8 +
+            recencyBoost * 10 - ambiguity * 30).roundToInt().coerceIn(30, 94)
         val trace = ConfidenceTrace(
             prior = (prior * 100).roundToInt(),
             evidence = (evidence * 100).roundToInt(),
@@ -388,6 +417,13 @@ object JevIntentEngine {
 
     private fun isSpokenQuestion(text: String): Boolean = spokenQuestion.containsMatchIn(text.replace(durationStatement, ""))
     private fun isQuestion(text: String): Boolean = question.containsMatchIn(text) || isSpokenQuestion(text)
+    private fun sameCounterpart(turn: Turn, sender: String): Boolean = turn.side == "other" &&
+        (turn.sender == sender || turn.sender == null && sender == "对方")
+    private fun isNegated(text: String, start: Int): Boolean =
+        negationBeforeCue.containsMatchIn(text.substring(maxOf(0, start - 8), start))
+    private fun ownAffectText(text: String): String = quotedSpeech.replace(text, " ").split(Regex("(?<=[，,。！!？?；;\\n])"))
+        .filterNot { NoticeRules.isReported(it) || thirdPersonReport.containsMatchIn(it.trim()) }
+        .joinToString("")
 
     private data class Result(val kind: Kind, val label: String, val nextStep: String,
                               val importance: IntentImportance)

@@ -290,4 +290,38 @@ class WeChatAdapterTest {
             assertEquals(if (title == "课程通知群(93)") title else null, adapter.inspect(root, resources).snapshot!!.title)
         }
     }
+
+    @Test fun senderAtTopOfMessageListDoesNotBecomeATitle() {
+        val root = node()
+        val list = node(bounds = Rect(0, 70, 360, 700)).apply { isScrollable = true }
+        child(root, list)
+        child(list, node("群成员昵称", Rect(100, 85, 230, 112), "android:id/text1"))
+        child(list, bubble("请提交课程报告", 130))
+        assertNull(adapter.inspect(root, resources).snapshot!!.title)
+    }
+
+    @Test fun nativeTitleWinsOverSecondaryToolbarLabel() {
+        val root = node()
+        val toolbar = node(bounds = Rect(0, 0, 360, 120), id = "com.tencent.mm:id/ei")
+        child(root, toolbar)
+        child(toolbar, node("23网工2(49)", Rect(90, 35, 280, 68), "com.tencent.mm:id/obn"))
+        child(toolbar, node("3条新消息", Rect(110, 80, 250, 108), "android:id/text1"))
+        child(root, bubble("请提交课程报告"))
+        assertEquals("23网工2(49)", adapter.inspect(root, resources).snapshot!!.title)
+    }
+
+    @Test fun unreadableHeaderStillProvidesOnlyItsMiddleTitleRegion() {
+        val root = node()
+        child(root, node(bounds = Rect(0, 24, 360, 104), id = "com.tencent.mm:id/ei"))
+        child(root, bubble("请提交课程报告"))
+        val result = adapter.inspect(root, resources)
+        assertNull(result.snapshot!!.title)
+        assertEquals(Rect(61, 24, 309, 104), result.titleBounds)
+    }
+
+    @Test fun headerWithoutChatEvidenceCannotEnableTitleOcr() {
+        val root = node()
+        child(root, node(bounds = Rect(0, 24, 360, 104), id = "com.tencent.mm:id/ei"))
+        assertNull(adapter.inspect(root, resources).titleBounds)
+    }
 }

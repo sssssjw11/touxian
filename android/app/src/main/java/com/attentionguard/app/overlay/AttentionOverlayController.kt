@@ -33,6 +33,8 @@ import com.attentionguard.app.core.CaptureMode
 import com.attentionguard.app.core.IntentInsight
 import com.attentionguard.app.core.OverlaySize
 import com.attentionguard.app.core.Prefs
+import com.attentionguard.app.core.ChatRecording
+import com.attentionguard.app.core.RecordingState
 import com.attentionguard.app.capture.CaptureDiagnostics
 import com.attentionguard.app.capture.HistoryState
 import com.attentionguard.app.capture.HistorySession
@@ -78,10 +80,12 @@ class AttentionOverlayController(private val context: Context) {
     private var status = ""
     private var actionLabel = "切换意图分析"
     private var history: HistorySession? = null
+    private var recording: ChatRecording? = null
     private var renderKey: List<Any?>? = null
     private var renderedMode: CaptureMode? = null
     private var renderedSize: OverlaySize? = null
     private var renderedInsight: IntentInsight? = null
+    private var renderedMenuOpen = false
     private var hiddenForCapture = false
     private val diagnostics = CaptureDiagnostics(context)
     private val accessibilityWindow = context is AccessibilityService
@@ -95,10 +99,21 @@ class AttentionOverlayController(private val context: Context) {
     var onRefreshIntent: (() -> Unit)? = null
     var onMarkCurrentChat: (() -> Unit)? = null
     var onHistorySettings: (() -> Unit)? = null
+    var onMessageKeywordSettings: (() -> Unit)? = null
     var onHistoryStart: (() -> Unit)? = null
     var onHistoryPause: (() -> Unit)? = null
     var onHistoryCancel: (() -> Unit)? = null
     var onDismiss: (() -> Unit)? = null
+    var onRecordingToggle: (() -> Unit)? = null
+    var onRecordingStop: (() -> Unit)? = null
+    var onRecordingLibrary: (() -> Unit)? = null
+    var onSaveIntentEvent: (() -> Unit)? = null
+
+    fun setRecording(value: ChatRecording?) {
+        if (recording == value) return
+        recording = value
+        requestRender()
+    }
 
     /**
      * Do not replace an attached accessibility-window view tree from inside
@@ -225,7 +240,7 @@ class AttentionOverlayController(private val context: Context) {
         val key = listOf(mode, size, prefs.overlayOpacity, darkOverlay, prefs.bubbleX, prefs.bubbleY,
             bounds.width(), bounds.height(), insets, context.resources.configuration.fontScale,
             group, status, actionLabel, loading, usingModel, expanded, evidenceExpanded, event,
-            menuOpen,
+            menuOpen, recording,
             insight?.copy(capturedAt = insight.capturedAt / 60_000),
             history?.let { listOf(it.id, it.state, it.screens, it.attempts, it.reason) })
         if (panel != null && renderKey == key) return
@@ -270,7 +285,7 @@ class AttentionOverlayController(private val context: Context) {
         }
         if (collapsed) {
             if (mode == CaptureMode.INTENT) {
-                header.addView(overlayText("意图分析 · 持续", R.dimen.ag_type_caption, overlayBrand, true).apply {
+                header.addView(overlayText(if (recording?.state == RecordingState.ACTIVE) "意图分析 · 记录中" else "意图分析 · 持续", R.dimen.ag_type_caption, overlayBrand, true).apply {
                     maxLines = 1
                     ellipsize = android.text.TextUtils.TruncateAt.END
                 }, LinearLayout.LayoutParams(0, -2, 1f))
@@ -377,7 +392,7 @@ class AttentionOverlayController(private val context: Context) {
             controls.addView(overlayIconButton(R.drawable.ag_x, "结束回溯") { onHistoryCancel?.invoke() })
             controls.addView(overlayIconButton(R.drawable.ag_notebook_tabs, "查看采集记录") { onHistorySettings?.invoke() })
             view.addView(controls)
-        } else if (!prefs.overlayCollapsed && expanded && insight != null) {
+        } else if (!prefs.overlayCollapsed && !menuOpen && expanded && insight != null) {
             val detail = ui.column()
             detail.addView(overlayText(insight.label, R.dimen.ag_type_heading, bold = true).apply { layoutParams = ui.lp(4) })
             detail.addView(overlayText("重要性 · ${insight.importance.label} · ${insight.contextSummary?.substringBefore(" · ") ?: "当前语境"}",
@@ -416,7 +431,7 @@ class AttentionOverlayController(private val context: Context) {
             }
             insight.eventId?.let { detail.addView(overlayButton("查看相关事件", R.drawable.ag_arrow_up_right) { openApp(it) }.apply { layoutParams = ui.lp(12) }) }
             view.addView(boundedDetails(detail, availableHeight))
-        } else if (!prefs.overlayCollapsed && expanded && event != null) {
+        } else if (!prefs.overlayCollapsed && !menuOpen && expanded && event != null) {
             val detail = ui.column()
             detail.addView(overlayText(event.title, R.dimen.ag_type_heading, bold = true).apply { layoutParams = ui.lp(4) })
             detail.addView(overlayText("事件类型 · ${event.category.label} · 重要性 ${event.priority.label} · ${event.attentionScore}分",
@@ -429,7 +444,7 @@ class AttentionOverlayController(private val context: Context) {
             detail.addView(overlayText("来源 · ${event.captureOrigin.label} · ${event.sourcePerson}", R.dimen.ag_type_caption, ui.sub).apply { layoutParams = ui.lp(8) })
             event.dueLabel?.let { detail.addView(overlayText(it, R.dimen.ag_type_label, ui.priority(event.priority).first, true).apply { layoutParams = ui.lp(12) }) }
             view.addView(boundedDetails(detail, availableHeight))
-        } else if (!prefs.overlayCollapsed && !loading) {
+        } else if (!prefs.overlayCollapsed && !menuOpen && !loading) {
             view.addView(overlayText(status, R.dimen.ag_type_caption, ui.sub).apply { layoutParams = ui.lp(4) })
             if (event != null || mode == CaptureMode.EVENT) view.addView(overlayButton(event?.title ?: actionLabel,
                 if (event == null) R.drawable.ag_scan_text else R.drawable.ag_chevron_down, false) {
@@ -439,13 +454,15 @@ class AttentionOverlayController(private val context: Context) {
         if (!collapsed) view.addView(ui.row().apply {
             gravity = Gravity.CENTER
             if (mode == CaptureMode.INTENT) {
+                addView(overlayIconButton(if (recording?.state == RecordingState.ACTIVE) R.drawable.ag_pause else R.drawable.ag_save,
+                    if (recording?.state == RecordingState.ACTIVE) "暂停会话记录" else "开始或继续会话记录") { onRecordingToggle?.invoke() })
                 val refresh = overlayIconButton(R.drawable.ag_rotate_ccw, "刷新整屏语境") { onRefreshIntent?.invoke() }
                 refresh.setOnClickListener {
                     dispatchClick { GuardMotion.refresh(refresh); onRefreshIntent?.invoke() }
                 }
                 addView(refresh)
             } else addView(overlayIconButton(R.drawable.ag_bookmark_plus, "标记当前微信会话") { onMarkCurrentChat?.invoke() })
-            addView(overlayIconButton(R.drawable.ag_notebook_tabs, "打开观测簿") { openApp() })
+            if (mode != CaptureMode.INTENT) addView(overlayIconButton(R.drawable.ag_notebook_tabs, "打开观测簿") { openApp() })
             val more = overlayIconButton(R.drawable.ag_ellipsis, "更多悬浮窗操作") {
                 menuOpen = !menuOpen
                 requestRender()
@@ -453,7 +470,12 @@ class AttentionOverlayController(private val context: Context) {
             addView(more)
             layoutParams = ui.lp(4)
         })
-        if (!collapsed && menuOpen) view.addView(overlayMenu())
+        if (!collapsed && menuOpen) view.addView(boundedDetails(overlayMenu(), availableHeight))
+        if (!collapsed && mode == CaptureMode.INTENT && recording?.state != RecordingState.FINISHED) recording?.let {
+            view.addView(overlayText("${it.state.label} · ${it.title}", R.dimen.ag_type_caption, overlayBrand).apply {
+                maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END; layoutParams = ui.lp(4)
+            })
+        }
         }
         val expandedWidth = minOf(ui.dp(312), (bounds.width() * 0.5f).roundToInt())
         // Keep event and intent surfaces identical in compact mode. The
@@ -527,9 +549,11 @@ class AttentionOverlayController(private val context: Context) {
             renderedMode = mode
             renderedSize = size
             renderedInsight = insight
+            val sameMenu = renderedMenuOpen == menuOpen
+            renderedMenuOpen = menuOpen
             val active = requireNotNull(panel)
             val detail = active.findViewById<ScrollView>(R.id.ag_overlay_detail)
-            if (previousMode == mode && previousSize == size && previousScroll > 0) detail?.post {
+            if (previousMode == mode && previousSize == size && sameMenu && previousScroll > 0) detail?.post {
                 if (detail.isAttachedToWindow) detail.scrollTo(0, previousScroll)
             }
             when {
@@ -563,16 +587,29 @@ class AttentionOverlayController(private val context: Context) {
         background = ui.shape(transparent(overlaySurface), transparent(overlayLine), 8)
         elevation = ui.dp(4).toFloat()
         setPadding(ui.dp(6), ui.dp(6), ui.dp(6), ui.dp(6))
+        if (prefs.captureMode == CaptureMode.INTENT) {
+            addView(menuItem(R.drawable.ag_bookmark_plus, "保存当前事项") { menuOpen = false; requestRender(); onSaveIntentEvent?.invoke() })
+            addView(menuItem(R.drawable.ag_notebook_tabs, "会话记录与深度分析") { menuOpen = false; onRecordingLibrary?.invoke() })
+            if (recording != null && recording?.state != RecordingState.FINISHED) {
+                addView(menuItem(R.drawable.ag_circle_check, "结束本次会话记录") { menuOpen = false; onRecordingStop?.invoke(); requestRender() })
+            }
+        }
         addView(menuItem(R.drawable.ag_bookmark_plus, "标记当前微信会话") {
             menuOpen = false
             requestRender()
             onMarkCurrentChat?.invoke()
         })
-        addView(menuItem(R.drawable.ag_clock_3, "回溯收集") {
+        if (prefs.captureMode == CaptureMode.EVENT) addView(menuItem(R.drawable.ag_clock_3, "回溯收集") {
             menuOpen = false
             requestRender()
             onHistorySettings?.invoke()
         })
+        if (prefs.captureMode == CaptureMode.EVENT) addView(menuItem(R.drawable.ag_bookmark_plus, "消息关键词") {
+            menuOpen = false
+            requestRender()
+            onMessageKeywordSettings?.invoke()
+        })
+        if (prefs.captureMode == CaptureMode.INTENT) addView(menuItem(R.drawable.ag_notebook_tabs, "查看观测簿") { menuOpen = false; openApp() })
         addView(menuItem(R.drawable.ag_grip_horizontal, "复位悬浮窗") {
             prefs.bubbleX = -1
             prefs.bubbleY = -1
