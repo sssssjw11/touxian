@@ -102,6 +102,26 @@ class AttentionOverlayControllerTest {
             .any { it.text.toString().contains("事件类型") && it.text.toString().contains("P0") })
     }
 
+    @Test fun aNewScreenOfTheSameChatKeepsTheEventCardAndItsHeight() {
+        ShadowSettings.setCanDrawOverlays(true)
+        prefs.overlaySize = OverlaySize.EXPANDED
+        val first = DemoAttentionData.events.first()
+        overlay.showEvent(first)
+        val mounted = windows.views.single()
+        val group = first.sourceGroup
+        overlay.showStatus(group, "已识别 9 条可见消息")
+        assertSame(mounted, windows.views.single())
+        assertTrue(descendants(mounted).filterIsInstance<android.widget.TextView>().any { it.text.toString().contains("事件类型") })
+        val height = (mounted as ViewGroup).getChildAt(0).measuredHeight
+        overlay.showEvent(first.copy(id = "short", title = "短", summary = "短"))
+        assertSame(mounted, windows.views.single())
+        assertTrue(height > 0)
+        assertTrue(mounted.getChildAt(0).measuredHeight >= height)
+        // Another chat is a real change: back to the idle layout.
+        overlay.showStatus("另一个群", "已识别 3 条可见消息")
+        assertFalse(descendants(windows.views.single()).filterIsInstance<android.widget.TextView>().any { it.text.toString().contains("事件类型") })
+    }
+
     @Test fun collapsedCardKeepsHistoryActionAndCanExpand() {
         ShadowSettings.setCanDrawOverlays(true)
         prefs.overlayCollapsed = true
@@ -273,6 +293,31 @@ class AttentionOverlayControllerTest {
         overlay.showIntent(insight.copy(evidence = "新的聊天文字"), expand = false)
         assertEquals(OverlaySize.BUBBLE, prefs.overlaySize)
         assertEquals(52, (windows.views.single().layoutParams as WindowManager.LayoutParams).width)
+    }
+
+    @Test fun deepenAndCancelUpdateSameWindowAndReplyCanBeCopied() {
+        ShadowSettings.setCanDrawOverlays(true)
+        prefs.captureMode = CaptureMode.INTENT; prefs.overlaySize = OverlaySize.EXPANDED
+        overlay.showIntent(IntentInsight("暂无明确请求", "继续观察", "算了，你忙吧", "甲", "聊天", 1L))
+        val host = windows.views.single()
+        var requested = 0; var cancelled = 0
+        overlay.onDeepenIntent = { requested++ }; overlay.onCancelDeepenIntent = { cancelled++ }
+        button("深入理解").performClick(); assertEquals(1, requested)
+        overlay.setLiveAnalysis(LiveAnalysisState(busy = true))
+        shadowOf(Looper.getMainLooper()).idle()
+        assertSame(host, windows.views.single())
+        button("取消深入理解").performClick(); assertEquals(1, cancelled)
+        val proof = com.attentionguard.app.core.ContextEvidence("live:0", "算了，你忙吧", "other", "甲", null)
+        val result = com.attentionguard.app.core.ContextInsight(com.attentionguard.app.core.AnalysisScene.FRIEND,
+            "需要结合前文核对", emptyList(), listOf(com.attentionguard.app.core.ReplySuggestion("你想先暂停吗？", "不确定所指时", listOf(proof))), emptyList(), "f")
+        overlay.setLiveAnalysis(LiveAnalysisState(insight = result))
+        shadowOf(Looper.getMainLooper()).idle()
+        assertSame(host, windows.views.single())
+        button("复制回复").performClick()
+        assertEquals("你想先暂停吗？", context.getSystemService(android.content.ClipboardManager::class.java).primaryClip!!.getItemAt(0).text.toString())
+        prefs.overlaySize = OverlaySize.BUBBLE
+        overlay.showIntent(IntentInsight("暂无明确请求", "继续观察", "算了，你忙吧", "甲", "聊天", 1L), false)
+        assertEquals(52, (host.layoutParams as WindowManager.LayoutParams).width)
     }
 
     private fun showAtRememberedPosition() {

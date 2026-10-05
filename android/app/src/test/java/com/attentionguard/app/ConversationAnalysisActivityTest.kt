@@ -140,6 +140,42 @@ class ConversationAnalysisActivityTest {
         assertTrue(recreated.findViewById<SwitchCompat>(R.id.ag_conversation_undated).isChecked)
     }
 
+    @Test fun linkedProfileSceneAndSceneChangesInvalidateCurrentReport() {
+        seed()
+        MessageArchive(context).use {
+            it.createProfile(com.attentionguard.app.core.ConversationProfile("p", "对象",
+                com.attentionguard.app.core.AnalysisScene.WORK), "fixture-1")
+        }
+        val activity = open("fixture-1"); await(activity)
+        assertTrue(activity.findViewById<MaterialButton>(R.id.ag_conversation_scene).text.contains("工作"))
+        activity.findViewById<MaterialButton>(R.id.ag_conversation_analyze).performClick(); await(activity)
+        MessageArchive(context).use {
+            val saved = JSONObject(it.recordingAnalysis("fixture-1")!!)
+            assertEquals("WORK", saved.getString("scene")); assertFalse(saved.getString("profileKey").isBlank())
+        }
+        activity.findViewById<MaterialButton>(R.id.ag_conversation_scene).performClick()
+        (ShadowDialog.getLatestDialog() as AlertDialog).listView.performItemClick(null, 1, 0)
+        shadowOf(Looper.getMainLooper()).idle(); await(activity)
+        assertTrue(activity.findViewById<MaterialButton>(R.id.ag_conversation_scene).text.contains("朋友"))
+        assertFalse(resultTexts(activity).any { it == "本地分析" })
+        controllers.last().recreate(); await(controllers.last().get())
+        assertTrue(controllers.last().get().findViewById<MaterialButton>(R.id.ag_conversation_scene).text.contains("朋友"))
+    }
+
+    @Test fun legacyVersionOneReportStillOpensAfterUpgrade() {
+        seed(); val activity = open("fixture-1"); await(activity)
+        activity.findViewById<MaterialButton>(R.id.ag_conversation_analyze).performClick(); await(activity)
+        MessageArchive(context).use {
+            val envelope = JSONObject(it.recordingAnalysis("fixture-1")!!)
+            envelope.put("version", 1); envelope.remove("scene"); envelope.remove("profileKey")
+            envelope.getJSONObject("report").apply { remove("context"); remove("scene"); remove("analysisVersion") }
+            it.saveRecordingAnalysis("fixture-1", envelope.toString())
+        }
+        activity.findViewById<View>(R.id.ag_conversation_refresh).performClick(); await(activity)
+        assertTrue(resultTexts(activity).any { it == "本地分析" })
+        assertTrue(resultTexts(activity).any { it.contains("支持") || it.contains("互动") })
+    }
+
     @Test fun evidenceDialogShowsTheOriginalStoredMessage() {
         seed()
         val activity = open("fixture-1")

@@ -9,7 +9,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 data class RelationshipMetric(val label: String, val value: String, val detail: String)
-data class RelationshipEvidence(val messageId: Long, val quote: String, val side: String, val day: String?)
+data class RelationshipEvidence(val messageId: Long, val quote: String, val side: String, val day: String?, val sender: String? = null)
 data class RelationshipFinding(val label: String, val detail: String, val evidence: List<RelationshipEvidence>)
 
 data class RelationshipReport(
@@ -22,11 +22,16 @@ data class RelationshipReport(
     val metrics: List<RelationshipMetric>,
     val findings: List<RelationshipFinding>,
     val limitations: List<String>,
-    val suggestions: List<String>
+    val suggestions: List<String>,
+    val scene: AnalysisScene = AnalysisScene.GENERAL,
+    val context: ContextInsight? = null,
+    val analysisVersion: Int = ContextInsight.VERSION
 ) {
     fun toJson(): String = JSONObject().apply {
         put("title", title); put("summary", summary); put("label", label); put("confidence", confidence)
         put("source", source); put("messageCount", messageCount)
+        put("analysisVersion", analysisVersion); put("scene", scene.name)
+        put("context", context?.json() ?: JSONObject.NULL)
         put("metrics", JSONArray().apply { metrics.forEach { metric -> put(JSONObject().apply {
             put("label", metric.label); put("value", metric.value); put("detail", metric.detail)
         }) } })
@@ -35,6 +40,7 @@ data class RelationshipReport(
             put("evidence", JSONArray().apply { finding.evidence.forEach { evidence -> put(JSONObject().apply {
                 put("messageId", evidence.messageId); put("quote", evidence.quote); put("side", evidence.side)
                 put("day", evidence.day ?: JSONObject.NULL)
+                put("sender", evidence.sender ?: JSONObject.NULL)
             }) } })
         }) } })
         put("limitations", JSONArray(limitations)); put("suggestions", JSONArray(suggestions))
@@ -59,9 +65,13 @@ data class RelationshipReport(
                     RelationshipFinding(finding.optString("label"), finding.optString("detail"),
                         objects(finding.optJSONArray("evidence")).map { evidence -> RelationshipEvidence(
                             evidence.optLong("messageId"), evidence.optString("quote"), evidence.optString("side"),
-                            if (evidence.isNull("day")) null else evidence.optString("day").takeIf(String::isNotBlank)
+                            if (evidence.isNull("day")) null else evidence.optString("day").takeIf(String::isNotBlank),
+                            evidence.nullableString("sender")
                         ) })
-                }, limitations = strings("limitations"), suggestions = strings("suggestions")
+                }, limitations = strings("limitations"), suggestions = strings("suggestions"),
+                scene = AnalysisScene.read(json.optString("scene")),
+                context = json.optJSONObject("context")?.let { runCatching { ContextInsight.read(it) }.getOrNull() },
+                analysisVersion = json.optInt("analysisVersion", 1)
             )
         }
     }
@@ -91,19 +101,20 @@ object RelationshipAnalysis {
         Signal.NEGATIVE to Regex("生气|难过|委屈|害怕|焦虑|失望|伤心|难受|孤独|不开心|\\[(?:发怒|愤怒|抓狂|大哭|流泪|难过|委屈|心碎)\\]|😠|😡|😭|💔")
     )
 
-    fun analyze(messages: List<ArchivedMessage>, title: String): RelationshipReport {
-        val scoped = messages.filter { title.isBlank() || ConversationIdentity.sameTitle(it.group, title) }
+    fun analyze(messages: List<ArchivedMessage>, title: String, scene: AnalysisScene = AnalysisScene.GENERAL,
+                profile: ConversationProfile? = null): RelationshipReport {
+        val scoped = if (profile != null) messages else messages.filter { title.isBlank() || ConversationIdentity.sameTitle(it.group, title) }
         val groups = scoped.map { it.group }.distinct()
-        if (!sameConversation(groups)) return emptyReport(title, "多个会话需要分开分析", "选择一个会话后再分析，避免把不同对象的消息合并。")
+        if (profile == null && !sameConversation(groups)) return emptyReport(title, "多个会话需要分开分析", "选择一个会话后再分析，避免把不同对象的消息合并。").copy(scene = scene)
         val rows = eligible(scoped)
-        if (rows.isEmpty()) return emptyReport(title, "日常互动候选", "当前范围没有可分析的双方文字或具名表情记录。")
+        if (rows.isEmpty()) return emptyReport(title, "日常互动候选", "当前范围没有可分析的双方文字或具名表情记录。").copy(scene = scene)
         val reads = rows.map(::read)
         val others = reads.filter { it.row.message.side == "other" }
         val mine = reads.filter { it.row.message.side == "me" }
         val names = others.mapNotNull { it.row.message.sender?.trim()?.takeIf { name ->
             name.isNotBlank() && name !in setOf("对方", "未知", "other", "them")
         } }.distinct()
-        val group = names.size > 1
+        val group = names.size > 1 || profile?.kind == ProfileKind.GROUP
         val otherName = if (group) "群成员" else "对方"
         val distinctive = reads.distinctBy { Triple(it.row.message.side, it.row.message.sender, it.text) }
         fun count(side: List<Read>, signal: Signal) = side.filter { signal in it.signals }
@@ -134,6 +145,7 @@ object RelationshipAnalysis {
             group -> "群体互动线索"
             boundaries > 0 -> "边界表达需要尊重"
             conflicts > repairs && conflicts >= 2 -> "紧张互动候选"
+            scene == AnalysisScene.WORK -> "工作沟通线索"
             bilateralAffection -> "双向亲近候选"
             bilateralSupport -> "相互支持候选"
             !reciprocal -> "单侧互动候选"
@@ -185,18 +197,19 @@ object RelationshipAnalysis {
                 !reciprocal -> "当前缺少另一侧记录，结论仅描述这一段可见表达。"
                 else -> "目前主要依据消息分布和可见表达，不能单凭聊天量判断喜欢程度。"
             }
-        return RelationshipReport(title, summary, label, confidence, messageCount = rows.size, metrics = metrics,
+        val report = RelationshipReport(title, summary, label, confidence, messageCount = rows.size, metrics = metrics,
             findings = findings, limitations = limitations, suggestions = buildList {
                 if (boundaries > 0) add("先尊重对方明确表达的边界；有疑问时直接确认，不把拒绝当作试探。")
                 if (conflicts > 0) add("围绕具体分歧确认各自需要，观察后续是否真正回应修复表达。")
                 if (!reciprocal || rows.size < 20) add("补充同一会话双方的连续上下文，再比较关系线索。")
                 add("打开原话证据核对引用、玩笑与真实经历，再作决定。")
-            })
+            }, scene = scene)
+        return report.copy(context = LocalContextAnalysis.fromReport(report, profile))
     }
 
     /** Keep source IDs and context; never turn capture order into a fictional conversation timeline. */
-    fun keyWindows(messages: List<ArchivedMessage>, limit: Int = 90): List<ArchivedMessage> {
-        if (limit <= 0 || !sameConversation(messages.map { it.group }.distinct())) return emptyList()
+    fun keyWindows(messages: List<ArchivedMessage>, limit: Int = 90, allowLinked: Boolean = false): List<ArchivedMessage> {
+        if (limit <= 0 || (!allowLinked && !sameConversation(messages.map { it.group }.distinct()))) return emptyList()
         val reads = eligible(messages).map(::read)
         if (reads.size <= limit) return chronological(reads).map { it.row }
         val ordered = chronological(reads)
@@ -246,10 +259,10 @@ object RelationshipAnalysis {
             val personalPhrase = signal == Signal.AFFECTION || (signal == Signal.BOUNDARY &&
                 Regex("(?:不喜欢|不爱|不想.{0,3}见)你$").containsMatchIn(match.value))
             val differentObject = personalPhrase && nonPersonalObject.containsMatchIn(suffix)
-            val explicitJoke = signal in setOf(Signal.CONFLICT, Signal.DISCLOSURE, Signal.NEGATIVE) &&
+            val explicitJoke = signal in setOf(Signal.CONFLICT, Signal.DISCLOSURE, Signal.NEGATIVE, Signal.BOUNDARY) &&
                 Regex("开玩笑|逗你|反话|才怪").containsMatchIn(text)
             !negated && !deniedDisclosure && !deniedPlan && !differentObject && !explicitJoke &&
-                !(questioned && signal in setOf(Signal.AFFECTION, Signal.PLAN, Signal.POSITIVE)) &&
+                !(questioned && signal in setOf(Signal.AFFECTION, Signal.PLAN, Signal.POSITIVE, Signal.BOUNDARY)) &&
                 !(signal == Signal.PLAN && !concreteTime.containsMatchIn(text))
         } }.keys
         return Read(row, text, signals, day(row.message))
@@ -261,14 +274,19 @@ object RelationshipAnalysis {
         val exact = exactTime(message)?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate() }
         return if (stated != null && exact != null && stated != exact) null else stated ?: exact
     }
-    private fun completeExactTime(reads: List<Read>) = reads.isNotEmpty() && reads.all { exactTime(it.row.message) != null && it.day != null }
+    private fun completeExactTime(reads: List<Read>) = reads.isNotEmpty() &&
+        reads.mapNotNull { it.row.recordingId }.distinct().size <= 1 &&
+        reads.all { exactTime(it.row.message) != null && it.day != null }
     private fun chronological(reads: List<Read>): List<Read> = when {
         completeExactTime(reads) -> reads.sortedBy { exactTime(it.row.message) }
         reads.isNotEmpty() && reads.all { it.day != null } -> reads.sortedBy { it.day }
         else -> reads
     }
     private fun evidence(read: Read) = RelationshipEvidence(read.row.id, read.row.message.text.take(600),
-        read.row.message.side, read.day?.toString())
+        read.row.message.side, read.day?.toString(), read.row.message.sender)
+
+    internal fun explicitBoundaries(messages: List<ArchivedMessage>): List<Long> = eligible(messages)
+        .filter { Signal.BOUNDARY in read(it).signals }.map { it.id }
 
     private fun intervalMetric(reads: List<Read>, group: Boolean): RelationshipMetric {
         if (group || !completeExactTime(reads)) return RelationshipMetric("异方消息间隔", "未计算",

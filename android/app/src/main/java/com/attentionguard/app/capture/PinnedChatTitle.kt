@@ -5,16 +5,24 @@ import com.attentionguard.app.core.ConversationIdentity
 import com.attentionguard.app.core.MessageType
 import com.attentionguard.app.core.ScreenOverlap
 
-/** A manually confirmed title remains tied to overlapping bubbles across window recreation. */
+/**
+ * A confirmed title stays tied to one chat. Overlapping bubbles *verify* a
+ * screen; staying in the same window with no navigation in between only
+ * *continues* it, because scrolling changes the bubbles but not the chat.
+ */
 internal class PinnedChatTitle(val title: String, initialWindowId: Int, initial: ChatSnapshot) {
     private var visible = initial
     private var lastWindowId = initialWindowId
     private var misses = 0
     private val unmatchedScreens = mutableSetOf<String>()
+    // False after navigation evidence (page change, leaving WeChat, a
+    // non-chat frame) until a screen is verified again.
     private var continuous = true
 
     fun pauseContinuity() { continuous = false }
+    fun isContinuous() = continuous
 
+    /** Strict: returns a titled snapshot only for a verified screen. */
     fun resolve(snapshot: ChatSnapshot, currentWindowId: Int): ChatSnapshot? {
         if (shouldExpire()) return null
         if (snapshot.sourcePackage != "com.tencent.mm" ||
@@ -22,11 +30,13 @@ internal class PinnedChatTitle(val title: String, initialWindowId: Int, initial:
             misses = 3
             return null
         }
-        if (snapshot.messages.isEmpty()) { pauseContinuity(); return null }
-        if (!matchesMessages(visible, snapshot, continuous && currentWindowId == lastWindowId)) {
-            pauseContinuity()
+        // Unreadable bubbles are neither a match nor evidence of another chat.
+        if (snapshot.messages.isEmpty()) return null
+        val sameWindow = currentWindowId == lastWindowId
+        if (!matchesMessages(visible, snapshot, continuous && sameWindow)) {
+            // A scrolled screen in the same window is not a failed page.
             // Re-reading one blocked viewport is not a new failed transition.
-            if (unmatchedScreens.add(snapshot.messagesSignature())) misses++
+            if (!(continuous && sameWindow) && unmatchedScreens.add(snapshot.messagesSignature())) misses++
             return null
         }
         misses = 0
@@ -36,6 +46,12 @@ internal class PinnedChatTitle(val title: String, initialWindowId: Int, initial:
         visible = snapshot
         return snapshot.copy(title = title)
     }
+
+    /** Display-only: the same chat is still open, but this screen is unverified. */
+    fun continues(snapshot: ChatSnapshot, currentWindowId: Int): Boolean =
+        !shouldExpire() && continuous && currentWindowId == lastWindowId &&
+            snapshot.sourcePackage == "com.tencent.mm" &&
+            (snapshot.title.isNullOrBlank() || ConversationIdentity.sameTitle(title, snapshot.title))
 
     fun shouldExpire(): Boolean = misses >= 3
 

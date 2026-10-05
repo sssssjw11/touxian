@@ -13,7 +13,9 @@ data class ChatInspection(
     val structuralBubbles: Int, val reason: String,
     val scrollTarget: AccessibilityNodeInfo? = null,
     val ocrRegions: List<ChatOcrRegion> = emptyList(),
-    val titleBounds: Rect? = null
+    val titleBounds: Rect? = null,
+    /** Title came from a known title id rather than the generic header scan. */
+    val titleFromId: Boolean = false
 )
 
 data class ChatOcrRegion(val bounds: Rect, val side: String, val date: String?, val timeLabel: String?)
@@ -236,7 +238,8 @@ class WeChatAdapter {
                 viewport.left + (viewport.width() * .86f).toInt(), viewport.bottom)
             Rect(bar).takeIf { it.intersect(center) && !it.isEmpty }
         }
-        return ChatInspection(ChatSnapshot(title, messages, pkg), entries.size, known.size, structural.coerceAtLeast(0), reason, scroll, ocrRegions, titleBounds)
+        return ChatInspection(ChatSnapshot(title, messages, pkg), entries.size, known.size, structural.coerceAtLeast(0), reason, scroll, ocrRegions, titleBounds,
+            titleFromId = title != null && exactTitleEntry != null)
     }
 
     companion object {

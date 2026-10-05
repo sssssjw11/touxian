@@ -38,6 +38,7 @@
             android:name=".CustomIntentActivity"
             android:exported="false" />
         <activity android:name=".ConversationAnalysisActivity" android:exported="false" />
+        <activity android:name=".ObjectProfilesActivity" android:exported="false" />
         <activity
             android:name=".CalendarActivity"
             android:exported="false" />

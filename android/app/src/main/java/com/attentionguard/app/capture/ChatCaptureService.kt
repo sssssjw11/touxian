@@ -44,6 +44,7 @@ open class ChatCaptureService : AccessibilityService(), CaptureActions, Recordin
     private lateinit var receipt: HistoryReceipt
     private lateinit var shared: SharedPreferences
     private var overlay: AttentionOverlayController? = null
+    private var liveIntent: LiveIntentController? = null
     private var snapshot: ChatSnapshot? = null
     private var inspection: ChatInspection? = null
     private var signature = ""
@@ -59,7 +60,12 @@ open class ChatCaptureService : AccessibilityService(), CaptureActions, Recordin
     private var automaticTitleGeneration = 0
     private var automaticTitleRequest: Int? = null
     private var automaticTitleScene = ""
+    private var automaticTitleSceneSince = 0L
     private var automaticTitleRetryAt = 0L
+    // An OCR title outside the scope is display-only: it suppresses repeated
+    // screenshots of the same chat but never enables capture or marking.
+    private var outOfScopeTitle: PinnedChatTitle? = null
+    private var continuedSignature: String? = null
     private var currentOrigin = CaptureOrigin.WECHAT_AUTO
     private var dismissedTitle: String? = null
     private var liveSuppressedTitle: String? = null
@@ -98,7 +104,7 @@ open class ChatCaptureService : AccessibilityService(), CaptureActions, Recordin
                 if (prefs.captureMode == CaptureMode.INTENT) stopHistoryForIntent()
                 else pauseHistory("观测设置已变化，请重新确认回溯")
                 dataGeneration++; invalidate(); ocr?.retry()
-                dismissedTitle = null
+                dismissedTitle = null; outOfScopeTitle = null
                 if (key == "enabled" || key == "capture_mode") updateKeepAlive()
                 if (prefs.enabled) safeCapture() else diagnostics.state("观测已暂停")
             }
@@ -129,8 +135,15 @@ open class ChatCaptureService : AccessibilityService(), CaptureActions, Recordin
             panel.onRefreshIntent = { if (prefs.captureMode == CaptureMode.INTENT) { intentSignature = null; safeCapture() } }
             panel.onRecordingToggle = {
                 if (CaptureRuntime.recording?.state == RecordingState.ACTIVE) pauseRecording()
-                else startRecording()
+                else ensureProfileRecording { liveIntent?.recordingStarted(it) }
             }
+            panel.onDeepenIntent = { liveIntent?.deepen() }
+            panel.onCancelDeepenIntent = { liveIntent?.cancel() }
+            panel.onChooseScene = { liveIntent?.chooseScene() }
+            panel.onCreateProfile = { liveIntent?.createProfile() }
+            panel.onChooseProfile = { liveIntent?.chooseProfile() }
+            panel.onProfiles = { liveIntent?.openProfiles() }
+            panel.onIntentEvidence = { title, proofs -> liveIntent?.showEvidence(title, proofs) }
             panel.onRecordingStop = { stopRecording() }
             panel.onSaveIntentEvent = { saveCurrentIntentEvents() }
             panel.onRecordingLibrary = {
@@ -155,9 +168,11 @@ open class ChatCaptureService : AccessibilityService(), CaptureActions, Recordin
             panel.onHistoryStart = { startHistory() }
             panel.onHistoryPause = { pauseHistory() }
             panel.onHistoryCancel = { cancelHistory() }
-            panel.onDismiss = { dismissedTitle = snapshot?.title ?: "" }
+            panel.onDismiss = { liveIntent?.reset(); dismissedTitle = snapshot?.title ?: "" }
         }
-        ocr = OnDeviceChatOcr(this) { hidden -> overlay?.setHiddenForCapture(hidden) }
+        liveIntent = LiveIntentController(this, { overlay?.setLiveAnalysis(it) }, { overlay?.toast(it) },
+            ::ensureProfileRecording, { CaptureRuntime.recording }, { pauseRecording("已打开对象档案") })
+        ocr = OnDeviceChatOcr(this, { region -> overlay?.covers(region) ?: false }) { hidden -> overlay?.setHiddenForCapture(hidden) }
         updateKeepAlive()
         diagnostics.state("等待前台微信会话")
         main.post(poll)
@@ -168,8 +183,13 @@ open class ChatCaptureService : AccessibilityService(), CaptureActions, Recordin
         if (event.packageName?.toString() == adapter.pkg) viewportRevision++
         if (event.packageName?.toString() == adapter.pkg && event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             cancelAutomaticTitle()
-            pinnedTitle?.pauseContinuity()
+            // Pane changes (types != 0) are logged apart from page changes so a
+            // device report shows whether a popup is what breaks continuity.
+            if (pinnedTitle?.isContinuous() == true)
+                diagnostics.pipeline("TITLE_BIND", if (event.contentChangeTypes == 0) "NAV_PAUSE" else "PANE_PAUSE")
+            pinnedTitle?.pauseContinuity(); outOfScopeTitle?.pauseContinuity()
             pauseRecording("微信页面已切换，请确认目标会话后继续记录")
+            liveIntent?.reset()
         }
         if (event.packageName?.toString() == adapter.pkg && event.eventType in intArrayOf(
                 AccessibilityEvent.TYPE_VIEW_SCROLLED, AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED)) ocr?.retry()
@@ -184,18 +204,21 @@ open class ChatCaptureService : AccessibilityService(), CaptureActions, Recordin
     private fun cancelPendingAnalysis() {
         generation++
         main.removeCallbacks(debounce)
+        // A cancelled cloud pass must not leave the kept event card on "整理中".
+        if (client != null || task != null) overlay?.clearLoading()
         client?.cancel(); client = null
         task?.cancel(true); task = null
     }
 
-    private fun invalidate() {
+    private fun invalidate(hideOverlay: Boolean = true) {
         cancelAutomaticTitle()
         ocr?.cancel()
         cancelPendingAnalysis()
+        liveIntent?.reset()
         snapshot = null; inspection = null; signature = ""; intentSignature = null
         currentOrigin = CaptureOrigin.WECHAT_AUTO
         CaptureRuntime.lastVisibleTitle = null
-        overlay?.hide()
+        if (hideOverlay) overlay?.hide()
     }
 
     private fun cancelTitleResolution() {
@@ -234,7 +257,7 @@ open class ChatCaptureService : AccessibilityService(), CaptureActions, Recordin
         if (!prefs.enabled) { invalidate(); diagnostics.state("观测已暂停"); return }
         val root = foregroundRoot() ?: run {
             pauseRecording("已离开微信或锁屏，请返回目标会话确认继续")
-            pinnedTitle?.pauseContinuity()
+            pinnedTitle?.pauseContinuity(); outOfScopeTitle?.pauseContinuity()
             pauseHistory("已离开微信或锁屏，回到目标会话后可继续")
             if (snapshot != null) dataGeneration++
             invalidate(); dismissedTitle = null; liveSuppressedTitle = null
@@ -242,6 +265,8 @@ open class ChatCaptureService : AccessibilityService(), CaptureActions, Recordin
             return
         }
         val raw = adapter.inspect(root, resources)
+        // A non-chat WeChat page (list, search, info) is navigation evidence.
+        if (raw.snapshot == null) outOfScopeTitle?.pauseContinuity()
         val result = withPinnedTitle(raw, root.windowId)
         diagnostics.inspected(result.nodeCount, result.knownBubbles, result.structuralBubbles,
             result.snapshot?.messages?.size ?: 0, result.reason)
@@ -253,10 +278,30 @@ open class ChatCaptureService : AccessibilityService(), CaptureActions, Recordin
         if (prefs.captureMode == CaptureMode.INTENT) { captureIntent(result); return }
         val next = result.snapshot
         if (next == null || next.title.isNullOrBlank() || next.messages.isEmpty() || !prefs.isAllowed(next.title)) {
+            // Scrolling inside a confirmed chat moves the bubbles, not the chat.
+            // Keep the confirmed name on screen; saving still waits for a
+            // verified screen (readable title, overlap or background OCR).
+            val pin = pinnedTitle
+            if (next != null && next.title.isNullOrBlank() && pin != null && prefs.isAllowed(pin.title) &&
+                result.knownBubbles + result.structuralBubbles > 0 &&
+                CaptureRuntime.history?.state != HistoryState.RUNNING && pin.continues(next, root.windowId)) {
+                showContinued(pin, next)
+                if (next.messages.isNotEmpty()) requestAutomaticTitle(result, root.windowId)
+                return
+            }
             pauseHistory("会话无法确认或没有可读消息，已停止翻页")
             if (snapshot != null) dataGeneration++
             cancelPendingAnalysis(); snapshot = null; inspection = null; signature = ""
-            CaptureRuntime.lastVisibleTitle = null
+            CaptureRuntime.lastVisibleTitle = null; continuedSignature = null
+            val untitled = next != null && next.title.isNullOrBlank() && next.messages.isNotEmpty()
+            // Same chat, title already read locally but outside the scope:
+            // keep the stable label instead of re-screenshotting every poll.
+            val knownOutside = if (untitled) outOfScopeTitleFor(requireNotNull(next), root.windowId) else null
+            if (knownOutside != null) {
+                diagnostics.state("本机已读到群名，但未匹配观测词条")
+                if (dismissedTitle == null) overlay?.showIdle(knownOutside, "会话未匹配观测范围")
+                return
+            }
             val reason = if (next != null && !next.title.isNullOrBlank() && !prefs.isAllowed(next.title)) "会话未匹配观测范围" else result.reason
             diagnostics.state(reason)
             // A blocked tree must still be diagnosable, but never treated as messages.
@@ -270,11 +315,44 @@ open class ChatCaptureService : AccessibilityService(), CaptureActions, Recordin
 
     private fun withPinnedTitle(result: ChatInspection, windowId: Int): ChatInspection {
         val pin = pinnedTitle ?: return result
-        val current = result.snapshot ?: run { pin.pauseContinuity(); return result }
+        val current = result.snapshot ?: run {
+            if (pin.isContinuous()) diagnostics.pipeline("TITLE_BIND", "NO_CHAT_PAUSE")
+            pin.pauseContinuity(); return result
+        }
         val titled = pin.resolve(current, windowId)
-        if (titled == null && pin.shouldExpire()) { pinnedTitle = null }
+        if (titled == null && pin.shouldExpire()) {
+            // Metadata only: which evidence released the confirmed chat.
+            diagnostics.pipeline("TITLE_BIND", when {
+                current.title.isNullOrBlank() -> "EXPIRED"
+                result.titleFromId -> "CONFLICT_ID"
+                else -> "CONFLICT_SCAN"
+            })
+            pinnedTitle = null
+        }
         if (titled == null) return result
         return result.copy(snapshot = titled, reason = if (pinnedTitleOrigin == CaptureOrigin.WECHAT_MANUAL) "标题由手动确认" else "本机标题已核对")
+    }
+
+    private fun outOfScopeTitleFor(current: ChatSnapshot, windowId: Int): String? {
+        val known = outOfScopeTitle ?: return null
+        if (prefs.isAllowed(known.title)) { outOfScopeTitle = null; return null }
+        val titled = known.resolve(current, windowId)
+        if (titled == null && known.shouldExpire()) { outOfScopeTitle = null; return null }
+        return titled?.title ?: known.title.takeIf { known.continues(current, windowId) }
+    }
+
+    /** Unverified screen of the confirmed chat: display only, never saved. */
+    private fun showContinued(pin: PinnedChatTitle, next: ChatSnapshot) {
+        diagnostics.state("滑动中，沿用已确认会话；核对后保存")
+        diagnostics.pipeline("TITLE_BIND", "CONTINUED")
+        if (next.messages.isEmpty() || dismissedTitle != null) return
+        val shown = next.messagesSignature()
+        if (shown == continuedSignature && overlay?.isShowing() == true) return
+        continuedSignature = shown
+        val history = CaptureRuntime.history?.takeIf { it.config.title == snapshot?.title && it.state != HistoryState.CANCELLED }
+        overlay?.showStatus(pin.title, "已识别 ${next.messages.size} 条可见消息" +
+            if (pinnedTitleOrigin == CaptureOrigin.WECHAT_MANUAL) " · 标题手动确认" else "", history,
+            actionLabel = "切换意图分析")
     }
 
     private fun cancelAutomaticTitle() {
@@ -294,8 +372,18 @@ open class ChatCaptureService : AccessibilityService(), CaptureActions, Recordin
         if (!prefs.localOcrEnabled || pendingMark != null || automaticTitleRequest != null ||
             original.messages.isEmpty() || result.knownBubbles + result.structuralBubbles == 0) return
         val scene = "$windowId|${original.messagesSignature()}"
-        if (scene != automaticTitleScene) { automaticTitleScene = scene; automaticTitleRetryAt = 0L }
         val now = SystemClock.elapsedRealtime()
+        if (scene != automaticTitleScene) {
+            automaticTitleScene = scene; automaticTitleSceneSince = now; automaticTitleRetryAt = 0L
+        }
+        // Every screenshot hides the card; wait until scrolling settles so a
+        // moving list does not blink it on each frame.
+        val settledAt = automaticTitleSceneSince + TITLE_SETTLE_MS
+        if (now < settledAt) {
+            main.removeCallbacks(captureSoon)
+            main.postDelayed(captureSoon, settledAt - now)
+            return
+        }
         if (now < automaticTitleRetryAt) return
         val request = ++automaticTitleGeneration
         automaticTitleRequest = request
@@ -324,6 +412,15 @@ open class ChatCaptureService : AccessibilityService(), CaptureActions, Recordin
                 return@readChatTitle
             }
             if (!prefs.isAllowed(title)) {
+                // The header names another chat: the continued binding was wrong.
+                pinnedTitle?.takeUnless { ConversationIdentity.sameTitle(it.title, title) }?.let {
+                    diagnostics.pipeline("TITLE_BIND", "OCR_CONFLICT")
+                    pinnedTitle = null
+                    if (snapshot != null) dataGeneration++
+                    cancelPendingAnalysis(); snapshot = null; inspection = null; signature = ""
+                    CaptureRuntime.lastVisibleTitle = null; continuedSignature = null
+                }
+                outOfScopeTitle = PinnedChatTitle(title, windowId, requireNotNull(fresh.snapshot))
                 diagnostics.pipeline("TITLE_OCR", "OUT_OF_SCOPE")
                 diagnostics.state("本机已读到群名，但未匹配观测词条")
                 overlay?.showIdle(title, "会话未匹配观测范围")
@@ -340,6 +437,7 @@ open class ChatCaptureService : AccessibilityService(), CaptureActions, Recordin
     private fun captureIntent(result: ChatInspection) {
         CaptureRuntime.lastVisibleTitle = null
         val current = result.snapshot?.takeIf { result.knownBubbles + result.structuralBubbles > 0 }
+        liveIntent?.observe(current)
         if (current == null) {
             pauseRecording("当前没有可读聊天，已暂停记录")
             overlay?.setRecording(CaptureRuntime.recording)
@@ -361,6 +459,20 @@ open class ChatCaptureService : AccessibilityService(), CaptureActions, Recordin
         } else {
             diagnostics.state("意图分析 · 整屏语境已更新")
             overlay?.showIntent(insight, expand = false)
+        }
+    }
+
+    private fun ensureProfileRecording(onReady: (ChatRecording) -> Unit) {
+        if (CaptureRuntime.recording?.state != RecordingState.ACTIVE && !startRecording()) return
+        val target = CaptureRuntime.recording ?: return
+        val revision = recordingRevision
+        storageWorker.execute {
+            val stored = runCatching { archive.recording(target.id) }.getOrNull()
+            main.post {
+                if (alive && revision == recordingRevision && stored != null &&
+                    CaptureRuntime.recording?.id == stored.id && CaptureRuntime.recording?.state == RecordingState.ACTIVE)
+                    onReady(stored)
+            }
         }
     }
 
@@ -511,9 +623,12 @@ open class ChatCaptureService : AccessibilityService(), CaptureActions, Recordin
 
     private fun acceptSnapshot(next: ChatSnapshot, result: ChatInspection, origin: CaptureOrigin) {
         if (snapshot?.title != next.title) {
-            dataGeneration++; invalidate(); dismissedTitle = null
+            // Re-render the mounted card in place; removing the window here
+            // replays its entry animation and reads as a flash.
+            dataGeneration++; invalidate(hideOverlay = false); dismissedTitle = null
             if (liveSuppressedTitle != next.title) liveSuppressedTitle = null
         }
+        outOfScopeTitle = null; continuedSignature = null
         CaptureRuntime.lastVisibleTitle = next.title
         currentOrigin = origin
         snapshot = next; inspection = result
@@ -524,7 +639,8 @@ open class ChatCaptureService : AccessibilityService(), CaptureActions, Recordin
         diagnostics.state(if (fromOcr) "本机 OCR 采集，内容待核对" else if (relevantHistory?.state == HistoryState.RUNNING) "历史回溯中" else if (origin == CaptureOrigin.WECHAT_MANUAL) "标题手动确认，正在监测可见消息" else "正在监测可见消息")
         val changed = next.signature() != signature
         if (changed || overlay?.isShowing() != true || relevantHistory != null) {
-            if (dismissedTitle != next.title) overlay?.showIdle(next.title,
+            // Keep this chat's event card; the new screen only updates status.
+            if (dismissedTitle != next.title) overlay?.showStatus(next.title,
                 if (fromOcr) "OCR ${next.messages.size} 条，内容待核对" else "已识别 ${next.messages.size} 条可见消息${if (origin == CaptureOrigin.WECHAT_MANUAL) " · 标题手动确认" else ""}", relevantHistory,
                 actionLabel = "切换意图分析")
         }
@@ -911,6 +1027,7 @@ open class ChatCaptureService : AccessibilityService(), CaptureActions, Recordin
         }
         main.removeCallbacksAndMessages(null)
         ocr?.close(); ocr = null
+        liveIntent?.close(); liveIntent = null
         overlay = null
         storageWorker.shutdown(); analysisWorker.shutdownNow()
         super.onDestroy()
@@ -920,5 +1037,6 @@ open class ChatCaptureService : AccessibilityService(), CaptureActions, Recordin
         private const val CHAT_INFO_BUTTON_ID = "com.tencent.mm:id/fq"
         private const val CHAT_INFO_POLL_MS = 220L
         private const val CHAT_INFO_TIMEOUT_ATTEMPTS = 14
+        private const val TITLE_SETTLE_MS = 600L
     }
 }

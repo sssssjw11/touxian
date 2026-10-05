@@ -9,22 +9,24 @@
 <p align="center">An Android attention assistant for visible WeChat conversations. Local-first, explainable, and always under your control.</p>
 
 <p align="center">
-  <a href="https://github.com/sssssjw11/attention-guard/releases/tag/v1.25"><img alt="1.25 预览版" src="https://img.shields.io/badge/version-1.25_preview-136B5A"></a>
+  <a href="docs/releases/v1.26.md"><img alt="1.26 预览版" src="https://img.shields.io/badge/version-1.26_preview-136B5A"></a>
   <img alt="Android 11 及以上" src="https://img.shields.io/badge/Android-11%2B-3DDC84?logo=android&logoColor=white">
   <img alt="Kotlin 原生应用" src="https://img.shields.io/badge/Kotlin-native-7F52FF?logo=kotlin&logoColor=white">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-315DA8"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/sssssjw11/attention-guard/releases/download/v1.25/touxian-1.25-debug.apk"><strong>下载 APK</strong></a> ·
+  <a href="https://github.com/sssssjw11/attention-guard/releases/download/v1.25/touxian-1.25-debug.apk"><strong>已公开的 1.25 APK</strong></a> ·
   <a href="#quick-start">快速开始</a> ·
   <a href="#features">功能介绍</a> ·
-  <a href="docs/releases/v1.25.md">更新与 Debug 记录</a> ·
+  <a href="docs/releases/v1.26.md">1.26 更新与升级说明</a> ·
   <a href="https://github.com/sssssjw11/attention-guard/issues">反馈问题</a>
 </p>
 
 > [!IMPORTANT]
-> 当前为 **1.25 预览版 / versionCode 26**，安装包使用 **debug 签名**，不是已完成全面验收的稳定版。只支持微信；群名空节点 OCR 的实际恢复、复杂语义和跨机型表现仍有待验证。请核对原始消息，不把规则评分当作事实或真实情绪概率。
+> 当前源码为 **1.26 预览版 / versionCode 28**，基于 **1.25.2 / 71c2342**，交付 APK 使用 **debug 签名**。本次未连接手机，真机覆盖安装与实际 DeepSeek 语境效果待验收；历史公开下载仍为 1.25。请核对原始消息，不把规则评分当作事实或真实情绪概率。
+
+**1.26 新增语境深化与对象档案。** 微信展开意图悬浮窗后点「深入理解」，确认范围再调用 DeepSeek；更多菜单可选择通用、朋友、工作、亲密场景，明确建档并记录或选择已有档案。APP 会话分析页可关联对象档案。每项新判断附原话与证据充分程度，回复支持复制；原文或关联变化后画像待更新，由用户主动更新。完整使用、数据库升级与验证边界见 [1.26 实施说明](docs/iteration-1.26.md)。
 
 **1.25 合并 1.23–1.25 的迭代。** 在会话记录、深度分析和诊断基础上，修复标题绑定与滑动后的群名恢复，新增自定义消息关键词、事件类型和重要性规则。完整变更、根因与验证边界见 [1.25 更新与 Debug 记录](docs/releases/v1.25.md)。
 

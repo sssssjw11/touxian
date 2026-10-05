@@ -1,0 +1,7 @@
+<resources>
+    <item name="ag_conversation_scene" type="id"/>
+    <item name="ag_conversation_profile" type="id"/>
+    <item name="ag_conversation_cancel" type="id"/>
+    <item name="ag_intent_deepen" type="id"/>
+    <item name="ag_intent_cancel_deepen" type="id"/>
+</resources>

@@ -8,6 +8,7 @@ import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
@@ -31,6 +32,7 @@ import com.attentionguard.app.R
 import com.attentionguard.app.core.AttentionEvent
 import com.attentionguard.app.core.CaptureMode
 import com.attentionguard.app.core.IntentInsight
+import com.attentionguard.app.core.ContextEvidence
 import com.attentionguard.app.core.OverlaySize
 import com.attentionguard.app.core.Prefs
 import com.attentionguard.app.core.ChatRecording
@@ -38,6 +40,8 @@ import com.attentionguard.app.core.RecordingState
 import com.attentionguard.app.capture.CaptureDiagnostics
 import com.attentionguard.app.capture.HistoryState
 import com.attentionguard.app.capture.HistorySession
+import com.attentionguard.app.capture.LiveAnalysisState
+import com.attentionguard.app.ui.AnalysisViews
 import com.attentionguard.app.ui.GuardUi
 import com.attentionguard.app.ui.GuardMotion
 import com.attentionguard.app.ui.GuardSegments
@@ -81,11 +85,17 @@ class AttentionOverlayController(private val context: Context) {
     private var actionLabel = "切换意图分析"
     private var history: HistorySession? = null
     private var recording: ChatRecording? = null
+    private var liveAnalysis = LiveAnalysisState()
+    private var deepDetailsExpanded = false
     private var renderKey: List<Any?>? = null
     private var renderedMode: CaptureMode? = null
     private var renderedSize: OverlaySize? = null
     private var renderedInsight: IntentInsight? = null
     private var renderedMenuOpen = false
+    // Height of the last event card, so the next event for the same chat does
+    // not shrink the window and bounce it back (the "屏闪" users saw).
+    private var renderedEventShape: List<Any?>? = null
+    private var renderedEventHeight = 0
     private var hiddenForCapture = false
     private val diagnostics = CaptureDiagnostics(context)
     private val accessibilityWindow = context is AccessibilityService
@@ -108,6 +118,20 @@ class AttentionOverlayController(private val context: Context) {
     var onRecordingStop: (() -> Unit)? = null
     var onRecordingLibrary: (() -> Unit)? = null
     var onSaveIntentEvent: (() -> Unit)? = null
+    var onDeepenIntent: (() -> Unit)? = null
+    var onCancelDeepenIntent: (() -> Unit)? = null
+    var onChooseScene: (() -> Unit)? = null
+    var onCreateProfile: (() -> Unit)? = null
+    var onChooseProfile: (() -> Unit)? = null
+    var onProfiles: (() -> Unit)? = null
+    var onIntentEvidence: ((String, List<ContextEvidence>) -> Unit)? = null
+
+    fun setLiveAnalysis(value: LiveAnalysisState) {
+        if (liveAnalysis == value) return
+        if (liveAnalysis.insight?.fingerprint != value.insight?.fingerprint) deepDetailsExpanded = false
+        liveAnalysis = value
+        if (panel != null) requestRender()
+    }
 
     fun setRecording(value: ChatRecording?) {
         if (recording == value) return
@@ -174,6 +198,13 @@ class AttentionOverlayController(private val context: Context) {
         }
 
     fun isShowing() = panel != null
+    /** Screen-space overlap; an unmeasured panel is treated as covering. */
+    fun covers(region: Rect): Boolean {
+        val host = panel ?: return false
+        if (host.width <= 0 || host.height <= 0) return true
+        val at = IntArray(2).also(host::getLocationOnScreen)
+        return Rect.intersects(Rect(at[0], at[1], at[0] + host.width, at[1] + host.height), region)
+    }
     fun setHiddenForCapture(hidden: Boolean) {
         hiddenForCapture = hidden
         panel?.visibility = if (hidden) View.INVISIBLE else View.VISIBLE
@@ -189,6 +220,7 @@ class AttentionOverlayController(private val context: Context) {
         renderedInsight = null
         lastInsight = null
         menuOpen = false
+        renderedEventShape = null; renderedEventHeight = 0
         diagnostics.overlay("已隐藏")
     }
     fun showIdle(group: String?, status: String = "正在监测可见消息", history: HistorySession? = null,
@@ -196,6 +228,22 @@ class AttentionOverlayController(private val context: Context) {
         this.group = group; this.status = status; this.history = history; this.actionLabel = actionLabel
         lastEvent = null; lastInsight = null; loading = false; expanded = false; render()
     }
+    /**
+     * A new screen of the chat whose event is on the card updates only the
+     * status line. Collapsing to idle and re-expanding ~100 ms later, when the
+     * local event is saved, is what made event mode flash; intent mode never
+     * passes through that idle layout.
+     */
+    fun showStatus(group: String?, status: String, history: HistorySession? = null,
+                   actionLabel: String = "切换意图分析") {
+        val event = lastEvent
+        if (event == null || history != null || this.history != null || group.isNullOrBlank() ||
+            this.group != group) { showIdle(group, status, history, actionLabel); return }
+        this.status = status; this.actionLabel = actionLabel
+        render()
+    }
+    /** Clears a stale "整理中" label without touching the card content. */
+    fun clearLoading() { if (loading) { loading = false; render() } }
     fun showLoading(useModel: Boolean = false) {
         history = null
         loading = true; usingModel = useModel; render()
@@ -240,7 +288,7 @@ class AttentionOverlayController(private val context: Context) {
         val key = listOf(mode, size, prefs.overlayOpacity, darkOverlay, prefs.bubbleX, prefs.bubbleY,
             bounds.width(), bounds.height(), insets, context.resources.configuration.fontScale,
             group, status, actionLabel, loading, usingModel, expanded, evidenceExpanded, event,
-            menuOpen, recording,
+            menuOpen, recording, liveAnalysis, deepDetailsExpanded,
             insight?.copy(capturedAt = insight.capturedAt / 60_000),
             history?.let { listOf(it.id, it.state, it.screens, it.attempts, it.reason) })
         if (panel != null && renderKey == key) return
@@ -394,6 +442,51 @@ class AttentionOverlayController(private val context: Context) {
             view.addView(controls)
         } else if (!prefs.overlayCollapsed && !menuOpen && expanded && insight != null) {
             val detail = ui.column()
+            detail.addView(overlayText("${liveAnalysis.scene.label}${liveAnalysis.profileName?.let { " · $it" }.orEmpty()}",
+                R.dimen.ag_type_caption, ui.sub).apply { layoutParams = ui.lp(4) })
+            detail.addView(overlayButton(if (liveAnalysis.busy) "取消深入理解" else "深入理解", R.drawable.ag_activity, false) {
+                if (liveAnalysis.busy) onCancelDeepenIntent?.invoke() else onDeepenIntent?.invoke()
+            }.apply { id = if (liveAnalysis.busy) R.id.ag_intent_cancel_deepen else R.id.ag_intent_deepen; layoutParams = ui.lp(6) })
+            if (liveAnalysis.status.isNotBlank()) detail.addView(overlayText(liveAnalysis.status, R.dimen.ag_type_caption, ui.sub)
+                .apply { layoutParams = ui.lp(4) })
+            liveAnalysis.insight?.let { deeper ->
+                detail.addView(overlayText(deeper.summary, R.dimen.ag_type_label, bold = true).apply {
+                    layoutParams = ui.lp(6); maxLines = if (deepDetailsExpanded) Int.MAX_VALUE else 4
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                })
+                detail.addView(overlayButton(if (deepDetailsExpanded) "收起解释与原话" else "解释与原话依据", R.drawable.ag_eye, false) {
+                    deepDetailsExpanded = !deepDetailsExpanded; requestRender()
+                }.apply { layoutParams = ui.lp(6) })
+                if (deepDetailsExpanded) {
+                    deeper.sections.forEach { section ->
+                        detail.addView(overlayText("${section.kind.label} · ${section.title}（${section.level.label}）",
+                            R.dimen.ag_type_label, bold = true).apply { layoutParams = ui.lp(10) })
+                        detail.addView(overlayText(section.detail, R.dimen.ag_type_label).apply { layoutParams = ui.lp(4) })
+                        section.alternatives.forEach { detail.addView(overlayText("其他解释：$it", R.dimen.ag_type_caption, ui.sub)) }
+                        section.evidence.forEach { proof ->
+                            val who = if (proof.side == "me") "我" else proof.sender ?: "对方"
+                            val source = if (proof.ref.startsWith("live:")) "当前" else "历史"
+                            detail.addView(overlayText("$who · $source · ${proof.day ?: "日期未确认"}\n「${proof.quote}」",
+                                R.dimen.ag_type_caption, ui.sub).apply { layoutParams = ui.lp(6); setTextIsSelectable(true) })
+                        }
+                        if (section.evidence.isNotEmpty()) detail.addView(overlayButton("查看完整依据", R.drawable.ag_eye, false) {
+                            onIntentEvidence?.invoke(section.title, section.evidence)
+                        }.apply { layoutParams = ui.lp(6) })
+                    }
+                    deeper.limitations.forEach { detail.addView(overlayText(it, R.dimen.ag_type_caption, ui.sub).apply { layoutParams = ui.lp(8) }) }
+                }
+                deeper.replies.forEach { reply ->
+                    detail.addView(overlayText(reply.timing, R.dimen.ag_type_caption, ui.sub).apply { layoutParams = ui.lp(8) })
+                    detail.addView(overlayText(reply.text, R.dimen.ag_type_label).apply { layoutParams = ui.lp(4) })
+                    detail.addView(overlayButton("复制回复", R.drawable.ag_copy, false) {
+                        AnalysisViews.copy(context, reply.text); toast("回复已复制")
+                    }.apply { layoutParams = ui.lp(4) })
+                    if (deepDetailsExpanded) detail.addView(overlayButton("回复依据", R.drawable.ag_eye, false) {
+                        onIntentEvidence?.invoke("回复适用依据", reply.evidence)
+                    }.apply { layoutParams = ui.lp(4) })
+                }
+                detail.addView(overlayText("本地即时判断", R.dimen.ag_type_caption, ui.sub).apply { layoutParams = ui.lp(12) })
+            }
             detail.addView(overlayText(insight.label, R.dimen.ag_type_heading, bold = true).apply { layoutParams = ui.lp(4) })
             detail.addView(overlayText("重要性 · ${insight.importance.label} · ${insight.contextSummary?.substringBefore(" · ") ?: "当前语境"}",
                 R.dimen.ag_type_caption, ui.sub).apply { layoutParams = ui.lp(5) })
@@ -494,8 +587,16 @@ class AttentionOverlayController(private val context: Context) {
             visibility = view.visibility
             addView(view, FrameLayout.LayoutParams(-1, -2))
         }
+        val eventCard = event != null && !bubble && mode == CaptureMode.EVENT && history == null
+        // Replacing one event with another for the same chat only changes the
+        // text; keep at least the previous height so the window does not resize.
+        val eventShape = if (eventCard) listOf(group, size, expanded, menuOpen, evidenceExpanded) else null
+        if (eventShape != null && eventShape == renderedEventShape && renderedEventHeight > 0 && panel != null)
+            view.minimumHeight = renderedEventHeight
         host.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(availableHeight, View.MeasureSpec.AT_MOST))
+        renderedEventShape = eventShape
+        renderedEventHeight = if (eventShape != null) host.measuredHeight else 0
         val maxX = (bounds.width() - insets.right - width).coerceAtLeast(insets.left)
         val composerReserve = if (bubble || collapsed) 0 else ui.dp(112)
         val maxY = (bounds.height() - insets.bottom - insets.top - host.measuredHeight - composerReserve).coerceAtLeast(0)
@@ -588,6 +689,10 @@ class AttentionOverlayController(private val context: Context) {
         elevation = ui.dp(4).toFloat()
         setPadding(ui.dp(6), ui.dp(6), ui.dp(6), ui.dp(6))
         if (prefs.captureMode == CaptureMode.INTENT) {
+            addView(menuItem(R.drawable.ag_settings_2, "分析场景：${liveAnalysis.scene.label}") { menuOpen = false; requestRender(); onChooseScene?.invoke() })
+            addView(menuItem(R.drawable.ag_bookmark_plus, "为当前对象建档") { menuOpen = false; requestRender(); onCreateProfile?.invoke() })
+            addView(menuItem(R.drawable.ag_notebook_tabs, "选择当前对象档案") { menuOpen = false; requestRender(); onChooseProfile?.invoke() })
+            addView(menuItem(R.drawable.ag_notebook_tabs, "管理对象档案") { menuOpen = false; requestRender(); onProfiles?.invoke() })
             addView(menuItem(R.drawable.ag_bookmark_plus, "保存当前事项") { menuOpen = false; requestRender(); onSaveIntentEvent?.invoke() })
             addView(menuItem(R.drawable.ag_notebook_tabs, "会话记录与深度分析") { menuOpen = false; onRecordingLibrary?.invoke() })
             if (recording != null && recording?.state != RecordingState.FINISHED) {
@@ -642,6 +747,4 @@ class AttentionOverlayController(private val context: Context) {
         }.onFailure { toast("暂时无法打开，请从桌面进入偷闲") }
     }
 }
-
-
 

@@ -19,11 +19,8 @@ class DeepSeekRelationshipClientTest {
     private val rows = listOf(ArchivedMessage(1, "group", Msg("me", "我陪你", date = "2026-09-30"), 1),
         ArchivedMessage(2, "group", Msg("other", "谢谢你", "friend", date = "2026-09-30"), 2))
     private val base = RelationshipAnalysis.analyze(rows, "group")
-    private fun answer(id: Long = 1, quote: String = "我陪你") = JSONObject().put("label", "相互支持候选")
-        .put("summary", "可见关切与回应").put("confidence", 85)
-        .put("findings", JSONArray().put(JSONObject().put("label", "支持").put("detail", "我方表达支持")
-            .put("evidence", JSONArray().put(JSONObject().put("messageId", id).put("quote", quote)))))
-        .put("suggestions", JSONArray().put("结合更多真实上下文核对"))
+    private fun answer(id: Long = 1, quote: String = "我陪你") =
+        ContextAnswer.json(ContextAnswer.proof("archive:$id", quote, "me", null))
     private class Connection(result: JSONObject) : HttpURLConnection(URL("https://example.invalid")) {
         val request = ByteArrayOutputStream()
         private val response = JSONObject().put("choices", JSONArray().put(JSONObject()
@@ -40,14 +37,15 @@ class DeepSeekRelationshipClientTest {
         val connection = Connection(answer())
         val report = DeepSeekRelationshipClient("test", "model") { connection }.analyze(rows, base.copy(messageCount = 20))
         assertEquals(base.metrics, report.metrics)
-        assertEquals(1L, report.findings.single().evidence.single().messageId)
-        assertEquals("我陪你", report.findings.single().evidence.single().quote)
-        assertTrue(report.confidence <= base.confidence + 10)
+        assertEquals(base.findings, report.findings)
+        assertEquals("archive:1", report.context!!.sections.single().evidence.single().ref)
+        assertEquals("我陪你", report.context!!.sections.single().evidence.single().quote)
+        assertEquals(base.confidence, report.confidence)
         assertTrue(connection.disconnected)
         val body = JSONObject(connection.request.toString("UTF-8"))
         val payload = JSONObject(body.getJSONArray("messages").getJSONObject(1).getString("content"))
-        assertFalse(payload.getJSONObject("local_report").has("findings"))
-        assertEquals(2, payload.getJSONArray("windows").length())
+        assertFalse(payload.getJSONObject("local_statistics").has("findings"))
+        assertEquals(2, payload.getJSONArray("messages").length())
     }
     @Test fun inventedEvidenceOrUnsuppliedIdsAreRejected() {
         for (answer in listOf(answer(999), answer(1, "我最爱你"))) {
@@ -58,13 +56,14 @@ class DeepSeekRelationshipClientTest {
     }
     @Test fun explicitBoundaryAndGroupCannotBeRelabeledAsRomance() {
         for (label in listOf("群体互动线索", "边界表达需要尊重")) {
-            val contrary = answer().put("summary", "拒绝是喜欢的试探")
-            val client = DeepSeekRelationshipClient("test", "model") { Connection(contrary) }
+            val client = DeepSeekRelationshipClient("test", "model") { Connection(answer()) }
             val report = client.analyze(rows, base.copy(label = label))
             assertEquals(label, report.label)
             assertEquals(base.summary, report.summary)
             assertEquals(base.confidence, report.confidence)
             assertEquals(base.findings, report.findings)
+            assertNotNull(report.context)
+            assertEquals(1, report.context!!.replies.size)
         }
     }
     @Test fun cancellationDoesNotSendARequest() {
