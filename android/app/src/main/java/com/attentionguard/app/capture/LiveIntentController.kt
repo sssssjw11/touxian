@@ -20,7 +20,10 @@ data class LiveAnalysisState(
     val insight: ContextInsight? = null,
     val busy: Boolean = false,
     val status: String = "",
-    val originals: Map<String, String> = emptyMap()
+    val originals: Map<String, String> = emptyMap(),
+    val localInsight: ContextInsight? = null,
+    val sources: List<ContextMessage> = emptyList(),
+    val recordingNames: Map<String, String> = emptyMap()
 )
 
 /** Ephemeral live analysis. Only explicit recording/profile actions write chat data. */
@@ -42,40 +45,52 @@ class LiveIntentController(
     private val storage = Executors.newSingleThreadExecutor()
     private val network = Executors.newSingleThreadExecutor()
     private val generation = AtomicInteger()
+    private val navigation = AtomicInteger()
     @Volatile private var closed = false
     @Volatile private var client: DeepSeekContextClient? = null
     private var current: ChatSnapshot? = null
     private var profile: ConversationProfile? = null
     private var checkingProfile = false
     private var dialog: AlertDialog? = null
+    private var dialogFollowsMessages = true
     private var state = LiveAnalysisState()
 
     private fun valid(token: Int) = !closed && generation.get() == token
     private fun post(token: Int, action: () -> Unit) { main.post { if (valid(token)) action() } }
-    private fun show(value: LiveAnalysisState) { state = value; if (!closed) publish(value) }
-    private fun invalidate() {
+    private fun selectionValid(token: Int) = !closed && navigation.get() == token
+    private fun postSelection(token: Int, action: () -> Unit) { main.post { if (selectionValid(token)) action() } }
+    private fun show(value: LiveAnalysisState) {
+        val input = current?.let { AnalysisInput.live(it, value.scene, profile = profile) }
+        val updated = value.copy(localInsight = input?.let(LocalContextAnalysis::live),
+            sources = if (value.insight != null) value.sources else input?.messages.orEmpty(),
+            originals = if (value.insight != null) value.originals else input?.let { sourceTexts(it, requireNotNull(current), null) }.orEmpty())
+        state = updated; if (!closed) publish(updated)
+    }
+    private fun invalidate(keepSelectionDialog: Boolean = false) {
         generation.incrementAndGet()
         client?.cancel(); client = null
-        dialog?.dismiss(); dialog = null
+        if (!keepSelectionDialog || dialogFollowsMessages) { dialog?.dismiss(); dialog = null }
     }
 
     fun reset() {
-        invalidate(); current = null; profile = null
+        navigation.incrementAndGet(); invalidate(); current = null; profile = null
         show(LiveAnalysisState())
     }
 
     fun observe(snapshot: ChatSnapshot?) {
         if (closed) return
         if (snapshot == null) { if (current != null) reset(); return }
-        val changed = current?.signature() != snapshot.signature()
-        if (current?.title != snapshot.title) {
+        val previous = current
+        val changed = previous?.signature() != snapshot.signature()
+        current = snapshot
+        if (previous?.title != snapshot.title) {
+            navigation.incrementAndGet()
             invalidate(); profile = null
             show(LiveAnalysisState())
         } else if (changed) {
-            invalidate()
+            invalidate(keepSelectionDialog = true)
             show(state.copy(insight = null, busy = false, status = "当前消息已更新", originals = emptyMap()))
         }
-        current = snapshot
         val selected = profile ?: return
         if (checkingProfile) return
         checkingProfile = true
@@ -85,7 +100,7 @@ class LiveIntentController(
                 checkingProfile = false
                 if (closed || profile?.id != selected.id) return@post
                 if (latest?.cacheKey != profile?.cacheKey) {
-                    invalidate(); profile = latest
+                    invalidate(keepSelectionDialog = true); profile = latest
                     show(state.copy(profileName = latest?.name, insight = null, busy = false,
                         status = "档案内容已变化，请重新深化", originals = emptyMap()))
                 }
@@ -94,13 +109,16 @@ class LiveIntentController(
     }
 
     fun cancel() {
+        navigation.incrementAndGet()
         invalidate()
         show(state.copy(busy = false, status = "深化已取消，本地判断保留"))
     }
 
     fun chooseScene() {
+        navigation.incrementAndGet()
         invalidate()
         show(state.copy(busy = false))
+        dialogFollowsMessages = false
         dialog = AnalysisViews.show(MaterialAlertDialogBuilder(AnalysisViews.context(context))
             .setTitle("本次分析场景")
             .setSingleChoiceItems(AnalysisScene.entries.map { it.label }.toTypedArray(), state.scene.ordinal) { choice, index ->
@@ -113,8 +131,10 @@ class LiveIntentController(
     fun deepen() {
         val snapshot = current ?: run { notify("请先打开可读的聊天"); return }
         if (credentials() == null) { notify("请先在偷闲设置中启用并配置 DeepSeek"); return }
+        navigation.incrementAndGet()
         invalidate()
         val token = generation.get()
+        dialogFollowsMessages = true
         val selected = profile
         val scene = state.scene
         show(state.copy(busy = true, status = "正在准备发送范围"))
@@ -131,18 +151,9 @@ class LiveIntentController(
                         return@post
                     }
                     show(state.copy(busy = false))
-                    val liveCount = input.messages.count { it.ref.startsWith("live:") }
-                    val savedCount = input.messages.size - liveCount
-                    dialog = AnalysisViews.show(MaterialAlertDialogBuilder(AnalysisViews.context(context))
-                        .setTitle("发送这些内容到 DeepSeek？")
-                        .setMessage("场景：${scene.label}\n当前可见消息 $liveCount 条；历史依据 $savedCount 条。" +
-                            (if (input.profileSummary.isNotBlank()) "\n附带已核对档案的摘要背景。" else "") +
-                            "\n正文与摘要共 ${input.messages.sumOf { it.text.length } + input.profileSummary.length} 字符。" +
-                            "\n实时结果仅在本次悬浮窗显示。")
-                        .setNegativeButton("取消", null)
-                        .setPositiveButton("发送并深入理解") { _, _ ->
+                    dialog = AnalysisViews.confirmInput(context, input, snapshot.title ?: "当前聊天", overlay = true) {
                             if (valid(token)) send(token, input, history, snapshot)
-                        }.create(), true)
+                    }
                 }
             }.onFailure { post(token) { show(state.copy(busy = false, status = "无法准备原文，请刷新后重试")) } }
         }
@@ -165,7 +176,8 @@ class LiveIntentController(
                 }
                 post(token) {
                     show(state.copy(insight = result, busy = false, status = "DeepSeek · 已核对原文引用",
-                        originals = sourceTexts(input, snapshot, history)))
+                        originals = sourceTexts(input, snapshot, history), sources = input.messages,
+                        recordingNames = history?.recordings.orEmpty().associate { it.id to it.title }))
                 }
             }.onFailure { post(token) { show(state.copy(busy = false, status = "深化未完成，本地判断保留；可点按重试")) } }
             if (client === connection) client = null
@@ -181,9 +193,11 @@ class LiveIntentController(
     }
 
     fun showEvidence(title: String, proofs: List<ContextEvidence>) {
-        if (state.insight == null || current == null) return
+        if ((state.insight == null && state.localInsight == null) || current == null) return
+        dialogFollowsMessages = true
         dialog?.dismiss()
-        dialog = AnalysisViews.evidence(context, title, proofs, state.originals, overlay = true)
+        dialog = AnalysisViews.evidence(context, title, proofs, state.originals, overlay = true,
+            sources = state.sources, recordingNames = state.recordingNames)
     }
 
     fun createProfile() {
@@ -191,22 +205,23 @@ class LiveIntentController(
         if (snapshot?.title.isNullOrBlank() || WeChatAdapter.isTruncatedTitle(snapshot?.title.orEmpty())) {
             notify("请先标记当前会话名称，再为对象建档"); return
         }
-        invalidate(); show(state.copy(busy = false))
-        val token = generation.get()
+        navigation.incrementAndGet(); invalidate(); show(state.copy(busy = false))
+        val token = navigation.get()
+        dialogFollowsMessages = false
         dialog = AnalysisViews.editProfile(context, initialName = snapshot?.title.orEmpty(), overlay = true) { name, scene, kind ->
-            if (!valid(token)) return@editProfile
+            if (!selectionValid(token)) return@editProfile
             ensureRecording { recording ->
-                if (!valid(token)) return@ensureRecording
+                if (!selectionValid(token)) return@ensureRecording
                 storage.execute {
                     runCatching {
-                        if (!valid(token)) return@execute
+                        if (!selectionValid(token)) return@execute
                         val created = ConversationProfile(UUID.randomUUID().toString(), name, scene, kind)
                         archive.createProfile(created, recording.id)
                         requireNotNull(archive.profile(created.id))
-                    }.onSuccess { created -> post(token) {
+                    }.onSuccess { created -> postSelection(token) {
                         profile = created
                         show(LiveAnalysisState(scene, created.name, status = "已建档并关联当前记录"))
-                    } }.onFailure { post(token) { notify("建档失败，原会话记录保留，请重试") } }
+                    } }.onFailure { postSelection(token) { notify("建档失败，原会话记录保留，请重试") } }
                 }
             }
         }
@@ -214,17 +229,18 @@ class LiveIntentController(
 
     fun chooseProfile() {
         if (current == null) { notify("请先打开目标聊天"); return }
-        invalidate(); show(state.copy(busy = false))
-        val token = generation.get()
+        navigation.incrementAndGet(); invalidate(); show(state.copy(busy = false))
+        val token = navigation.get()
+        dialogFollowsMessages = false
         storage.execute {
             val result = runCatching { archive.profiles() }
-            post(token) {
+            postSelection(token) {
                 result.onSuccess { profiles ->
                     val labels = listOf("本次不使用对象档案") + profiles.map { "${it.name} · ${it.scene.label} · ${it.id.takeLast(6)}" }
                     dialog = AnalysisViews.show(MaterialAlertDialogBuilder(AnalysisViews.context(context))
                         .setTitle("请选择当前聊天对象")
                         .setItems(labels.toTypedArray()) { _, index ->
-                            if (!valid(token)) return@setItems
+                            if (!selectionValid(token)) return@setItems
                             if (index == 0) {
                                 profile = null; show(LiveAnalysisState(state.scene, status = "本次仅使用当前消息"))
                             } else selectProfile(profiles[index - 1], token)
@@ -239,17 +255,17 @@ class LiveIntentController(
             it.state == RecordingState.ACTIVE && ConversationIdentity.sameTitle(it.title, current?.title.orEmpty())
         }
         fun useProfile() {
-            if (!valid(token)) return
+            if (!selectionValid(token)) return
             storage.execute {
                 runCatching {
-                    if (!valid(token)) return@execute
+                    if (!selectionValid(token)) return@execute
                     if (recording != null) archive.linkRecording(selected.id, recording.id)
                     requireNotNull(archive.profile(selected.id))
-                }.onSuccess { latest -> post(token) {
+                }.onSuccess { latest -> postSelection(token) {
                     profile = latest
                     show(LiveAnalysisState(latest.scene, latest.name, status =
                         if (recording == null) "已选择档案；新消息需明确开始记录后关联" else "已关联当前记录"))
-                } }.onFailure { post(token) { notify("关联失败，请重试") } }
+                } }.onFailure { postSelection(token) { notify("关联失败，请重试") } }
             }
         }
         if (recording == null) useProfile()
@@ -270,21 +286,21 @@ class LiveIntentController(
 
     fun recordingStarted(recording: ChatRecording) {
         val selected = profile ?: return
-        val token = generation.get()
+        val token = navigation.get()
         storage.execute {
             runCatching {
-                if (!valid(token)) return@execute
+                if (!selectionValid(token)) return@execute
                 archive.linkRecording(selected.id, recording.id)
                 requireNotNull(archive.profile(selected.id))
-            }.onSuccess { latest -> post(token) {
+            }.onSuccess { latest -> postSelection(token) {
                 profile = latest
                 show(state.copy(insight = null, status = "已关联当前记录，画像待更新"))
-            } }.onFailure { post(token) { notify("档案关联失败，请在档案页重新关联") } }
+            } }.onFailure { postSelection(token) { notify("档案关联失败，请在档案页重新关联") } }
         }
     }
 
     fun close() {
-        closed = true; invalidate(); main.removeCallbacksAndMessages(null)
+        closed = true; navigation.incrementAndGet(); invalidate(); main.removeCallbacksAndMessages(null)
         network.shutdownNow()
         // The network executor can still unwind after disconnect; do not close its shared helper early.
         storage.execute { network.awaitTermination(25, java.util.concurrent.TimeUnit.SECONDS); archive.close() }

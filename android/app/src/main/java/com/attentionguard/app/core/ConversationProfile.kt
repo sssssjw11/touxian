@@ -23,4 +23,20 @@ data class ProfileSnapshot(val profile: ConversationProfile, val recordings: Lis
     val freshLocalReport: RelationshipReport? get() = report("localReport")
     val freshCloudReport: RelationshipReport? get() = report("cloudReport")
     val freshReport: RelationshipReport? get() = freshCloudReport ?: freshLocalReport
+    private val stored: org.json.JSONObject? get() = profile.analysis?.let { runCatching { org.json.JSONObject(it) }.getOrNull() }
+    val lastAnalyzedAt: Long? get() = stored?.optLong("analyzedAt")?.takeIf { it > 0 }
+    val lastMessageCount: Int? get() = stored?.optInt("sourceMessageCount", -1)?.takeIf { it >= 0 }
+    /** A stale summary is for explicit review only; it never enters a new analysis input. */
+    val previousSummary: String? get() = stored?.let { json ->
+        val report = json.optJSONObject("cloudReport") ?: json.optJSONObject("localReport") ?: json
+        report.optString("summary").takeIf { it.isNotBlank() }
+    }
+    val updateLabel: String get() = when {
+        freshReport != null -> "画像已更新"
+        profile.analysis == null -> "尚未生成画像"
+        stored?.optInt("version", 1) != ContextInsight.VERSION -> "分析方式已升级 · 画像待更新"
+        lastMessageCount != null && messages.size > requireNotNull(lastMessageCount) ->
+            "新增 ${messages.size - requireNotNull(lastMessageCount)} 条消息 · 画像待更新"
+        else -> "原文、关联或场景有变化 · 画像待更新"
+    }
 }

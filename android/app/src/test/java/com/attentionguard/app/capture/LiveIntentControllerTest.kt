@@ -1,6 +1,9 @@
 package com.attentionguard.app.capture
 
 import android.os.Looper
+import android.view.View
+import android.view.ViewGroup
+import android.widget.EditText
 import androidx.appcompat.app.AlertDialog
 import com.attentionguard.app.ai.ContextAnswer
 import com.attentionguard.app.ai.DeepSeekContextClient
@@ -68,6 +71,9 @@ class LiveIntentControllerTest {
         assertTrue(connection.entered.await(10, TimeUnit.SECONDS))
     }
     @After fun close() { controllers.forEach { it.close() }; shadowOf(Looper.getMainLooper()).idle() }
+    private fun children(view: View): Sequence<View> = sequence {
+        yield(view); if (view is ViewGroup) for (i in 0 until view.childCount) yieldAll(children(view.getChildAt(i)))
+    }
 
     @Test fun observationNeverRecordsOrSendsAndManualConfirmationIsRequired() {
         val connection = Connection(); val controller = controller(connection)
@@ -77,6 +83,29 @@ class LiveIntentControllerTest {
         connection.release.countDown(); await(controller, "network")
         assertNotNull(state.insight); assertFalse(state.busy)
         MessageArchive(context).use { assertEquals(0, it.count().total); assertTrue(it.profiles().isEmpty()) }
+    }
+    @Test fun profileFormSurvivesMessagesInSameChatAndIsInvalidatedByChatSwitch() {
+        val recording = ChatRecording("form-r", "聊天", 1)
+        MessageArchive(context).use { it.createRecording(recording) }
+        val controller = LiveIntentController(context, { state = it }, {}, { callback -> recordRequests++; callback(recording) },
+            { recording }, {}).also { controllers.add(it); it.observe(snapshot) }
+        controller.createProfile()
+        var dialog = ShadowDialog.getLatestDialog() as AlertDialog
+        controller.observe(snapshot.copy(messages = snapshot.messages + Msg("other", "新的消息", "甲")))
+        assertTrue(dialog.isShowing)
+        children(dialog.window!!.decorView).filterIsInstance<EditText>().single().setText("同一对象")
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick(); await(controller)
+        MessageArchive(context).use {
+            assertEquals("同一对象", it.profiles().single().name)
+            assertEquals(it.profiles().single().id, it.profileForRecording(recording.id)!!.id)
+        }
+        controller.createProfile()
+        dialog = ShadowDialog.getLatestDialog() as AlertDialog
+        controller.observe(snapshot.copy(title = "其他聊天"))
+        assertFalse(dialog.isShowing)
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick(); await(controller)
+        MessageArchive(context).use { assertEquals(1, it.profiles().size) }
+        assertEquals(1, recordRequests)
     }
     @Test fun changedChatMessageSceneCancelAndCloseCannotReceiveOldResponse() {
         for (change in listOf<(LiveIntentController) -> Unit>(

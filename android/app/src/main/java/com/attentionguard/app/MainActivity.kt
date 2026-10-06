@@ -261,6 +261,9 @@ class MainActivity : AppCompatActivity() {
         body.addView(ui.navigationRow(R.drawable.ag_notebook_tabs, "会话分析", "已保存聊天 · 关系与语境") {
             startActivity(Intent(this, ConversationAnalysisActivity::class.java))
         }.apply { layoutParams = ui.lp(12) })
+        body.addView(ui.navigationRow(R.drawable.ag_bookmark_plus, "对象档案", "关联记录 · 沟通画像 · 待更新") {
+            startActivity(Intent(this, ObjectProfilesActivity::class.java))
+        }.apply { layoutParams = ui.lp(8) })
         body.addView(ui.row().apply {
             minimumHeight = ui.dp(48)
             addView(ui.icon(R.drawable.ag_activity, ui.brand, 16))

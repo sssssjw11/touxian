@@ -3,7 +3,10 @@ param([string]$Apk = "$PSScriptRoot\..\app\build\outputs\apk\debug\app-debug.apk
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $path = (Resolve-Path -LiteralPath $Apk).Path
-$expected = @('Lcom/attentionguard/app/core/NoticeRules;', 'buildEvents', 'isCancelled')
+$expected = @('Lcom/attentionguard/app/core/NoticeRules;', 'buildEvents', 'isCancelled',
+    'Lcom/attentionguard/app/CustomIntentActivity;', 'Lcom/attentionguard/app/ObjectProfilesActivity;',
+    'Lcom/attentionguard/app/capture/LiveIntentController;', 'Lcom/attentionguard/app/core/LocalContextAnalysis;',
+    'confirmInput', 'lastAnalyzedAt', 'sourceMessageCount')
 $found = @{}
 $zip = [System.IO.Compression.ZipFile]::OpenRead($path)
 try {

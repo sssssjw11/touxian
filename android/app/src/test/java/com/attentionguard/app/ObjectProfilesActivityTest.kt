@@ -29,9 +29,10 @@ import java.util.concurrent.TimeUnit
 class ObjectProfilesActivityTest {
     private val context = RuntimeEnvironment.getApplication()
     private val controllers = mutableListOf<ActivityController<ObjectProfilesActivity>>()
-    private fun open(profileId: String? = null, recordingId: String? = null): ObjectProfilesActivity =
+    private fun open(profileId: String? = null, recordingId: String? = null, returnResult: Boolean = false): ObjectProfilesActivity =
         Robolectric.buildActivity(ObjectProfilesActivity::class.java, Intent(context, ObjectProfilesActivity::class.java)
-            .putExtra(ObjectProfilesActivity.EXTRA_PROFILE_ID, profileId).putExtra(ObjectProfilesActivity.EXTRA_RECORDING_ID, recordingId))
+            .putExtra(ObjectProfilesActivity.EXTRA_PROFILE_ID, profileId).putExtra(ObjectProfilesActivity.EXTRA_RECORDING_ID, recordingId)
+            .putExtra(ObjectProfilesActivity.EXTRA_RETURN_RESULT, returnResult))
             .setup().also(controllers::add).get().also(::await)
     private fun await(activity: ObjectProfilesActivity) {
         val worker = ObjectProfilesActivity::class.java.getDeclaredField("worker").apply { isAccessible = true }.get(activity) as ExecutorService
@@ -87,5 +88,71 @@ class ObjectProfilesActivityTest {
         val text = children(activity.window.decorView).filterIsInstance<TextView>().map { it.text.toString() }.toList()
         assertTrue(text.any { it.contains("画像待更新") })
         assertFalse(text.any { it == "本地画像" })
+    }
+
+    @Test fun sameNameProfilesCanBeFoundByRecordOrIdAndTransferReturnsToCallerOnlyAfterConfirmation() {
+        seed()
+        MessageArchive(context).use {
+            it.createProfile(ConversationProfile("p-aaaaaa", "同名对象", AnalysisScene.FRIEND), "r")
+            it.createProfile(ConversationProfile("p-bbbbbb", "同名对象", AnalysisScene.WORK))
+        }
+        val activity = open(recordingId = "r", returnResult = true)
+        val search = activity.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.ag_profile_search)
+        search.setText("聊天")
+        assertEquals(1, children(activity.window.decorView).filterIsInstance<MaterialButton>().count { it.text.toString() == "关联到这个档案" })
+        search.setText("bbbbbb")
+        button(activity, "关联到这个档案").performClick()
+        var dialog = ShadowDialog.getLatestDialog() as AlertDialog
+        assertTrue(children(dialog.window!!.decorView).filterIsInstance<TextView>().any { it.text.toString().contains("原档案移除") })
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
+        MessageArchive(context).use { assertEquals("p-aaaaaa", it.profileForRecording("r")!!.id) }
+        assertFalse(activity.isFinishing)
+        button(activity, "关联到这个档案").performClick()
+        dialog = ShadowDialog.getLatestDialog() as AlertDialog
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick(); await(activity)
+        MessageArchive(context).use {
+            assertEquals("p-bbbbbb", it.profileForRecording("r")!!.id); assertEquals(2, it.recordingMessages("r").size)
+        }
+        assertTrue(activity.isFinishing)
+        assertEquals(android.app.Activity.RESULT_OK, shadowOf(activity).resultCode)
+        assertEquals("p-bbbbbb", shadowOf(activity).resultIntent.getStringExtra(ObjectProfilesActivity.EXTRA_PROFILE_ID))
+    }
+
+    @Test fun cancelOnlyAppearsDuringWorkAndUpdateMetadataSurvivesReopen() {
+        seed()
+        MessageArchive(context).use { it.createProfile(ConversationProfile("p", "对象"), "r") }
+        val activity = open("p")
+        assertEquals(View.GONE, button(activity, "取消分析").visibility)
+        val update = button(activity, "更新本地画像")
+        update.performClick()
+        assertFalse(update.isEnabled)
+        assertEquals(View.VISIBLE, button(activity, "取消分析").visibility)
+        await(activity)
+        assertEquals(View.GONE, button(activity, "取消分析").visibility)
+        MessageArchive(context).use {
+            val snapshot = it.profileSnapshot("p")!!
+            assertNotNull(snapshot.lastAnalyzedAt); assertEquals(2, snapshot.lastMessageCount)
+            assertEquals("画像已更新", snapshot.updateLabel)
+        }
+    }
+
+    @Test fun staleSummaryCanBeReviewedButHasNoCurrentReportAndUnlinkNeedsConfirmation() {
+        seed()
+        MessageArchive(context).use {
+            it.createProfile(ConversationProfile("p", "对象"), "r")
+            val snapshot = it.profileSnapshot("p")!!
+            it.saveProfileAnalysis("p", snapshot.fingerprint, RelationshipAnalysis.analyze(snapshot.messages, "对象", profile = snapshot.profile))
+            it.append(ChatSnapshot("聊天", listOf(Msg("me", "我陪你"), Msg("other", "谢谢你", "甲"), Msg("other", "需要空间", "甲"))), "r", requireRecording = true)
+            assertNull(it.profileSnapshot("p")!!.freshReport)
+        }
+        val activity = open("p")
+        button(activity, "回顾上次摘要").performClick()
+        assertTrue(children(activity.window.decorView).filterIsInstance<TextView>().any { it.isShown && it.text.toString().contains("本次分析不会引用") })
+        button(activity, "解除关联").performClick()
+        (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
+        MessageArchive(context).use { assertNotNull(it.profileForRecording("r")) }
+        button(activity, "解除关联").performClick()
+        (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick(); await(activity)
+        MessageArchive(context).use { assertNull(it.profileForRecording("r")); assertTrue(it.recordingMessages("r").isNotEmpty()) }
     }
 }

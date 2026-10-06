@@ -449,7 +449,7 @@ class AttentionOverlayController(private val context: Context) {
             }.apply { id = if (liveAnalysis.busy) R.id.ag_intent_cancel_deepen else R.id.ag_intent_deepen; layoutParams = ui.lp(6) })
             if (liveAnalysis.status.isNotBlank()) detail.addView(overlayText(liveAnalysis.status, R.dimen.ag_type_caption, ui.sub)
                 .apply { layoutParams = ui.lp(4) })
-            liveAnalysis.insight?.let { deeper ->
+            (liveAnalysis.insight ?: liveAnalysis.localInsight)?.let { deeper ->
                 detail.addView(overlayText(deeper.summary, R.dimen.ag_type_label, bold = true).apply {
                     layoutParams = ui.lp(6); maxLines = if (deepDetailsExpanded) Int.MAX_VALUE else 4
                     ellipsize = android.text.TextUtils.TruncateAt.END
@@ -747,4 +747,3 @@ class AttentionOverlayController(private val context: Context) {
         }.onFailure { toast("暂时无法打开，请从桌面进入偷闲") }
     }
 }
-

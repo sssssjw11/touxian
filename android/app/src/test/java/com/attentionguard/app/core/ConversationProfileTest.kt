@@ -34,6 +34,23 @@ class ConversationProfileTest {
         assertEquals(setOf("r1"), snapshot().messages.map { it.recordingId }.toSet())
         assertEquals(2, archive.profiles().size)
     }
+    @Test fun previousAnalysisVersionIsReviewableButNeverFreshBackground() {
+        seed(); create()
+        val original = snapshot()
+        archive.saveProfileAnalysis("p1", original.fingerprint, analyze(original))
+        val stored = JSONObject(requireNotNull(archive.profile("p1")!!.analysis)).put("version", 2)
+        archive.writableDatabase.execSQL("UPDATE conversation_profiles SET analysis=? WHERE id='p1'", arrayOf(stored.toString()))
+        val legacy = snapshot()
+        assertNull(legacy.freshReport)
+        assertNotNull(legacy.previousSummary)
+        assertTrue(legacy.updateLabel.contains("分析方式已升级"))
+        val input = AnalysisInput.live(ChatSnapshot("同名聊天", listOf(Msg("other", "谢谢你", "甲"))),
+            legacy.profile.scene, legacy.messages, legacy.profile,
+            legacy.freshReport?.summary.orEmpty())
+        assertTrue(input.profileSummary.isEmpty())
+        assertTrue(archive.saveProfileAnalysis("p1", legacy.fingerprint, analyze(legacy)))
+        assertNotNull(snapshot().freshReport)
+    }
     @Test fun multipleRecordingsCanBeLinkedAcrossChangedDisplayNames() {
         seed(); seed("r2", "改过的名称"); create()
         archive.linkRecording("p1", "r2")

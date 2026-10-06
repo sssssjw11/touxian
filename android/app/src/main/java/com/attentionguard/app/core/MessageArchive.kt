@@ -335,6 +335,7 @@ class MessageArchive(context: Context) : SQLiteOpenHelper(context.applicationCon
         val local = if (cloud) current.freshLocalReport ?: return@synchronized false else report
         val envelope = JSONObject().put("version", ContextInsight.VERSION).put("localReport", JSONObject(local.toJson()))
             .put("cloudReport", if (cloud) JSONObject(report.toJson()) else JSONObject.NULL)
+            .put("analyzedAt", System.currentTimeMillis()).put("sourceMessageCount", current.messages.size)
         if (!canWrite()) return@synchronized false
         writableDatabase.update("conversation_profiles", ContentValues().apply {
             put("analysis", envelope.toString()); put("analysis_fingerprint", fingerprint)

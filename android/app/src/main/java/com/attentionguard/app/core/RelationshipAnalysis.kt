@@ -87,7 +87,8 @@ object RelationshipAnalysis {
     private val uncertain = Regex("(?:吗|么|是不是|是否|开玩笑|逗你|反话|才怪|呵呵|[？?])")
     private val sarcasm = Regex("开玩笑|逗你|反话|才怪|呵呵")
     private val nonPersonalObject = Regex("^(?:们|的|这个|这份|这次|这套|这张|这种|这段|这样|把|能|会|帮|明天|今天|后天|负责|处理|提交|发给|同学|朋友|同事|室友|家人|姐姐|妹妹|哥哥|弟弟|妈妈|爸爸)")
-    private val explicitBoundary = Regex("不喜欢你|不爱你|不想.{0,3}见你|别再联系|不要再联系|只是朋友|只想做朋友|不要越界|需要独处|先冷静|需要空间")
+    private val explicitBoundary = Regex("不喜欢你|不爱你|不想.{0,3}见你|别再联系|不要再联系|只是朋友|只想做朋友|不要越界|需要独处|先冷静|需要空间|" +
+        "不(?:需要|想|想要|希望)你.{0,8}(?:回复|建议|解释)|(?:不用|不要|别)(?:急着|再|现在)?(?:回复|给我建议|打断我|催我)")
     private val concreteTime = Regex("明天|后天|今晚|下周|周[一二三四五六日天]|星期[一二三四五六日天]|[0-9]{1,2}月|[0-9]{1,2}[号日]|[0-9]{1,2}[:：][0-9]{2}")
     private val patterns = mapOf(
         Signal.AFFECTION to Regex("喜欢你|爱你|想你|想念你|想见你|舍不得你|在乎你|想和你在一起"),
@@ -204,7 +205,7 @@ object RelationshipAnalysis {
                 if (!reciprocal || rows.size < 20) add("补充同一会话双方的连续上下文，再比较关系线索。")
                 add("打开原话证据核对引用、玩笑与真实经历，再作决定。")
             }, scene = scene)
-        return report.copy(context = LocalContextAnalysis.fromReport(report, profile))
+        return report.copy(context = LocalContextAnalysis.fromReport(report, profile, rows))
     }
 
     /** Keep source IDs and context; never turn capture order into a fictional conversation timeline. */

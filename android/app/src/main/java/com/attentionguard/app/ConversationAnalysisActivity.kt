@@ -12,6 +12,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.widget.SwitchCompat
 import com.attentionguard.app.ai.DeepSeekRelationshipClient
 import com.attentionguard.app.capture.CaptureRuntime
@@ -25,6 +26,7 @@ import com.attentionguard.app.core.RelationshipAnalysis
 import com.attentionguard.app.core.RelationshipReport
 import com.attentionguard.app.core.AnalysisScene
 import com.attentionguard.app.core.AnalysisFingerprint
+import com.attentionguard.app.core.AnalysisInput
 import com.attentionguard.app.core.ContextInsight
 import com.attentionguard.app.core.ConversationProfile
 import com.attentionguard.app.ui.AnalysisViews
@@ -90,6 +92,9 @@ class ConversationAnalysisActivity : AppCompatActivity() {
     private val generation = AtomicInteger()
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
+    private val associateProfile = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK) { sceneExplicit = false; load() }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -201,8 +206,8 @@ class ConversationAnalysisActivity : AppCompatActivity() {
         }.apply { id = R.id.ag_conversation_scene; layoutParams = ui.lp(12) }
         addView(sceneButton)
         profileButton = ui.button("关联对象档案", R.drawable.ag_bookmark_plus, false) {
-            selectedId?.let { id -> startActivity(Intent(this@ConversationAnalysisActivity, ObjectProfilesActivity::class.java)
-                .putExtra(ObjectProfilesActivity.EXTRA_RECORDING_ID, id)) }
+            selectedId?.let { id -> associateProfile.launch(Intent(this@ConversationAnalysisActivity, ObjectProfilesActivity::class.java)
+                .putExtra(ObjectProfilesActivity.EXTRA_RECORDING_ID, id).putExtra(ObjectProfilesActivity.EXTRA_RETURN_RESULT, true)) }
         }.apply { id = R.id.ag_conversation_profile; layoutParams = ui.lp(8) }
         addView(profileButton)
         analyzeButton = ui.button("深度分析", R.drawable.ag_scan_text) { analyze(false) }.apply {
@@ -459,14 +464,26 @@ class ConversationAnalysisActivity : AppCompatActivity() {
 
     private fun confirmCloud() {
         if (!cloudButton.isEnabled) return
-        MaterialAlertDialogBuilder(this).setTitle("发送选定内容进行深化？")
-            .setMessage("将选定范围的全量统计与关键语境（最多 90 条消息、40,000 字符正文）发送至 DeepSeek 进行分析。\n\n会话：" + selected?.title +
-                "\n场景：" + selectedScene.label +
-                "\n范围：" + (currentRange()?.toString() ?: "全部已保存消息") +
-                "\n本地统计范围：" + selectedMessages.size + " 条\n本地分析结果会保留。")
-            .setNegativeButton("取消", null)
-            .setPositiveButton("发送并分析") { _, _ -> analyze(true) }
-            .show()
+        val recording = selected ?: return
+        val content = selectedMessages.toList()
+        val profile = linkedProfile
+        val scene = selectedScene
+        val request = generation.incrementAndGet()
+        setBusy(true); status.text = "正在准备发送范围…"
+        worker.execute {
+            runCatching {
+                val base = RelationshipAnalysis.analyze(content, recording.title, scene, profile)
+                val input = AnalysisInput.deep(content, base, profile)
+                post(request) {
+                    setBusy(false)
+                    if (input.messages.isEmpty()) { status.text = "没有可发送的原文，请先核对自动识别的文字，或使用自由分析"; return@post }
+                    AnalysisViews.confirmInput(this, input, recording.title + " · " +
+                        (currentRange()?.toString() ?: "全部已保存消息")) {
+                        if (valid(request)) analyze(true)
+                    }
+                }
+            }.onFailure { post(request) { setBusy(false); status.text = "发送范围读取失败，请刷新重试" } }
+        }
     }
 
     private fun analyze(cloud: Boolean) {
@@ -547,6 +564,10 @@ class ConversationAnalysisActivity : AppCompatActivity() {
 
     private fun renderReports() {
         result.removeAllViews()
+        if (localReport?.analysisVersion?.let { it < ContextInsight.VERSION } == true) {
+            result.addView(ui.text("这是旧版分析，仍可回顾原文；点击「深度分析」可更新到当前分析方式。",
+                R.dimen.ag_type_caption, ui.sub).apply { layoutParams = ui.lp(8) })
+        }
         localReport?.let { renderReport(it, "本地分析") }
         cloudReport?.let {
             result.addView(ui.divider(20))
@@ -563,18 +584,17 @@ class ConversationAnalysisActivity : AppCompatActivity() {
         result.addView(ui.text(report.label, R.dimen.ag_type_heading, bold = true).apply { layoutParams = ui.lp(12) })
         result.addView(ui.text(report.summary).apply { layoutParams = ui.lp(8) })
         result.addView(ui.confidence("判断置信度", report.confidence).apply { layoutParams = ui.lp(12) })
-        report.metrics.forEach { metric ->
-            result.addView(ui.statusRow(metric.label, metric.value.toString(), ui.brand).apply { layoutParams = ui.lp(8) })
-            if (metric.detail.isNotBlank()) result.addView(ui.text(metric.detail, R.dimen.ag_type_caption, ui.sub).apply { layoutParams = ui.lp(5) })
-        }
         report.context?.let { context ->
-            AnalysisViews.append(result, context, selectedMessages.associate { "archive:${it.id}" to it.message.text })
+            AnalysisViews.append(result, context, selectedMessages.associate { "archive:${it.id}" to it.message.text },
+                selectedMessages.map(AnalysisInput::archived), selected?.let { mapOf(it.id to it.title) }.orEmpty())
+            AnalysisViews.metrics(result, report.metrics)
             if (context.replies.isEmpty() && report.suggestions.isNotEmpty()) {
                 result.addView(ui.heading("下一步"))
                 result.addView(ui.text(report.suggestions.joinToString("\n")).apply { layoutParams = ui.lp(8) })
             }
             return
         }
+        AnalysisViews.metrics(result, report.metrics)
         report.findings.forEach { finding ->
             result.addView(ui.text(finding.label, bold = true).apply { layoutParams = ui.lp(18) })
             result.addView(ui.text(finding.detail, R.dimen.ag_type_label, ui.sub).apply { layoutParams = ui.lp(6) })
