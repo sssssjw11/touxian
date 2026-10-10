@@ -38,10 +38,33 @@ class PinnedChatTitleTest {
         assertEquals("课程群(48)", pin.resolve(initial.copy(title = "课程群（49）"), 8)?.title)
     }
 
-    @Test fun emptyTreeDoesNotExpireButThreeDistinctUnmatchedScreensDo() {
+    @Test fun scrollingInTheSameWindowContinuesWithoutVerifyingOrExpiring() {
+        val pin = PinnedChatTitle("课程群", 7, initial)
+        repeat(6) { page ->
+            val scrolled = initial.copy(messages = listOf(Msg("other", "滚动后的第 $page 屏"), Msg("me", "好")))
+            assertNull(pin.resolve(scrolled, 7))
+            assertTrue(pin.continues(scrolled, 7))
+        }
+        assertFalse(pin.shouldExpire())
+        assertEquals("课程群", pin.resolve(initial, 7)?.title)
+    }
+
+    @Test fun navigationAnotherWindowOrAnotherHeaderEndsContinuation() {
+        val scrolled = initial.copy(messages = listOf(Msg("other", "完全没有重叠的另一屏")))
+        assertFalse(PinnedChatTitle("课程群", 7, initial).continues(scrolled, 8))
+        assertFalse(PinnedChatTitle("课程群", 7, initial).continues(scrolled.copy(title = "另一个群"), 7))
+        assertTrue(PinnedChatTitle("课程群(48)", 7, initial).continues(scrolled.copy(title = "课程群(49)"), 7))
+        val paused = PinnedChatTitle("课程群", 7, initial).also { it.pauseContinuity() }
+        assertFalse(paused.continues(scrolled, 7))
+        assertEquals("课程群", paused.resolve(initial, 7)?.title)
+        assertTrue(paused.continues(scrolled, 7))
+    }
+
+    @Test fun emptyTreeDoesNotExpireButThreeDistinctUnmatchedScreensAfterNavigationDo() {
         val pin = PinnedChatTitle("课程群", 7, initial)
         repeat(4) { assertNull(pin.resolve(initial.copy(messages = emptyList()), 7)) }
         assertFalse(pin.shouldExpire())
+        pin.pauseContinuity()
         repeat(3) { page ->
             assertNull(pin.resolve(initial.copy(messages = listOf(Msg("other", "不匹配页面 $page"))), 7))
         }
@@ -51,6 +74,7 @@ class PinnedChatTitleTest {
 
     @Test fun pollingTheSameUnmatchedScreenDoesNotExpireTheConfirmedTitle() {
         val pin = PinnedChatTitle("课程群", 7, initial)
+        pin.pauseContinuity()
         val unmatched = initial.copy(messages = listOf(Msg("other", "完全没有重叠的另一屏")))
         repeat(20) { poll ->
             assertNull(pin.resolve(unmatched.copy(capturedAt = poll.toLong()), 7))
@@ -63,6 +87,7 @@ class PinnedChatTitleTest {
         val pin = PinnedChatTitle("课程群", 7, initial)
         val first = initial.copy(messages = listOf(Msg("other", "未匹配页面一")))
         val second = initial.copy(messages = listOf(Msg("other", "未匹配页面二")))
+        pin.pauseContinuity()
         repeat(4) {
             assertNull(pin.resolve(first, 7))
             assertNull(pin.resolve(second, 7))
@@ -76,10 +101,12 @@ class PinnedChatTitleTest {
         val pin = PinnedChatTitle("课程群", 7, initial)
         val first = initial.copy(messages = listOf(Msg("other", "未匹配页面一")))
         val second = initial.copy(messages = listOf(Msg("other", "未匹配页面二")))
+        pin.pauseContinuity()
         assertNull(pin.resolve(first, 7))
         assertNull(pin.resolve(second, 7))
         val overlapping = initial.copy(messages = initial.messages.drop(1) + Msg("other", "另一条课程通知"))
         assertEquals("课程群", pin.resolve(overlapping, 7)?.title)
+        pin.pauseContinuity()
         assertNull(pin.resolve(first, 7))
         assertNull(pin.resolve(second, 7))
         assertFalse(pin.shouldExpire())

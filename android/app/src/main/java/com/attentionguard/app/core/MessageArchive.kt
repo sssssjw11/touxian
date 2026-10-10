@@ -7,6 +7,7 @@ import android.database.sqlite.SQLiteOpenHelper
 import com.attentionguard.app.capture.HistoryRange
 import java.util.concurrent.atomic.AtomicLong
 import org.json.JSONArray
+import org.json.JSONObject
 
 /** Align neighboring visible screens. Repeated text is not a global message ID. */
 object ScreenOverlap {
@@ -29,14 +30,14 @@ object ScreenOverlap {
     }
 }
 
-data class ArchivedMessage(val id: Long, val group: String, val message: Msg, val capturedAt: Long)
+data class ArchivedMessage(val id: Long, val group: String, val message: Msg, val capturedAt: Long, val recordingId: String? = null)
 data class ArchiveCount(val total: Int, val undated: Int)
 data class ArchiveWrite(val added: Int, val gap: Boolean)
 
 data class ArchiveReview(val duplicateCount: Int, val uncertainCount: Int)
 
 /** App-private SQLite archive. It is independent of event selection and cloud calls. */
-class MessageArchive(context: Context) : SQLiteOpenHelper(context.applicationContext, "message_archive.db", null, 3) {
+class MessageArchive(context: Context) : SQLiteOpenHelper(context.applicationContext, "message_archive.db", null, 4) {
     private data class Seen(val message: Msg, val id: Long?)
     private var screenEpoch = EPOCH.get()
     private val screens = object : LinkedHashMap<String, List<Seen>>(16, .75f, true) {
@@ -48,6 +49,7 @@ class MessageArchive(context: Context) : SQLiteOpenHelper(context.applicationCon
         db.execSQL("CREATE INDEX messages_group ON messages(group_title,_id)")
         createCheckpoints(db)
         createRecordings(db)
+        createProfiles(db)
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) createCheckpoints(db)
@@ -55,12 +57,23 @@ class MessageArchive(context: Context) : SQLiteOpenHelper(context.applicationCon
             db.execSQL("ALTER TABLE messages ADD COLUMN message_time INTEGER")
             createRecordings(db)
         }
+        if (oldVersion < 4) createProfiles(db)
     }
     private fun createCheckpoints(db: SQLiteDatabase) = db.execSQL(
         "CREATE TABLE screen_checkpoints (stream TEXT PRIMARY KEY, signature TEXT NOT NULL, ids TEXT NOT NULL, captured_at INTEGER NOT NULL)")
 
     private fun createRecordings(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE recordings (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at INTEGER NOT NULL, ended_at INTEGER, state TEXT NOT NULL, reason TEXT NOT NULL, gaps INTEGER NOT NULL DEFAULT 0, analysis TEXT)")
+    }
+
+    private fun createProfiles(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE conversation_profiles (id TEXT PRIMARY KEY, name TEXT NOT NULL, scene TEXT NOT NULL, kind TEXT NOT NULL, created_at INTEGER NOT NULL, revision INTEGER NOT NULL DEFAULT 0, analysis TEXT, analysis_fingerprint TEXT)")
+        db.execSQL("CREATE TABLE profile_recordings (recording_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL)")
+        db.execSQL("CREATE INDEX profile_recordings_profile ON profile_recordings(profile_id)")
+    }
+
+    private fun invalidateProfile(db: SQLiteDatabase, recordingId: String) {
+        db.execSQL("UPDATE conversation_profiles SET revision=revision+1 WHERE id IN (SELECT profile_id FROM profile_recordings WHERE recording_id=?)", arrayOf(recordingId))
     }
 
     // Only an exact, recent viewport replay survives service reconnection. This
@@ -89,6 +102,7 @@ class MessageArchive(context: Context) : SQLiteOpenHelper(context.applicationCon
         val matches = ScreenOverlap.match(previous.map { it.message }, snapshot.messages)
         val next = ArrayList<Seen>()
         var added = 0
+        var changed = false
         db.beginTransaction()
         try {
             snapshot.messages.forEachIndexed { index, incoming ->
@@ -105,9 +119,11 @@ class MessageArchive(context: Context) : SQLiteOpenHelper(context.applicationCon
                     }
                     if (id == null || db.update("messages", values, "_id=?", arrayOf(id.toString())) == 0) {
                         id = db.insertOrThrow("messages", null, values); added++
+                        changed = true
                     }
+                    if (old != null && old.message != message) changed = true
                 } else {
-                    if (id != null) db.delete("messages", "_id=?", arrayOf(id.toString()))
+                    if (id != null) { db.delete("messages", "_id=?", arrayOf(id.toString())); changed = true }
                     id = null
                 }
                 next.add(Seen(message, id))
@@ -118,7 +134,10 @@ class MessageArchive(context: Context) : SQLiteOpenHelper(context.applicationCon
                 put("stream", stream); put("signature", snapshot.signature()); put("ids", ids.toString()); put("captured_at", snapshot.capturedAt)
             }, SQLiteDatabase.CONFLICT_REPLACE)
             db.execSQL("DELETE FROM screen_checkpoints WHERE stream NOT IN (SELECT stream FROM screen_checkpoints ORDER BY captured_at DESC LIMIT 16)")
-            if (added > 0 && recording != null) db.execSQL("UPDATE recordings SET analysis=NULL WHERE id=?", arrayOf(stream))
+            if (changed) {
+                if (recording != null) db.execSQL("UPDATE recordings SET analysis=NULL WHERE id=?", arrayOf(stream))
+                invalidateProfile(db, stream)
+            }
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
         screens[stream] = next
@@ -159,7 +178,7 @@ class MessageArchive(context: Context) : SQLiteOpenHelper(context.applicationCon
             buildList {
                 while (c.moveToNext()) add(ArchivedMessage(c.getLong(c.getColumnIndexOrThrow("_id")), str("group_title"),
                     Msg(str("side"), str("body"), str("sender"), timestamp = c.getColumnIndexOrThrow("message_time").let { if (c.isNull(it)) null else c.getLong(it) }, type = MessageType.valueOf(str("kind")), date = str("day"), timeLabel = str("time_label"), captureMethod = str("capture_method")),
-                    c.getLong(c.getColumnIndexOrThrow("captured_at"))))
+                    c.getLong(c.getColumnIndexOrThrow("captured_at")), str("stream")))
             }
         }
     }
@@ -219,6 +238,120 @@ class MessageArchive(context: Context) : SQLiteOpenHelper(context.applicationCon
         if (it.moveToFirst() && !it.isNull(0)) it.getString(0) else null
     }
 
+    fun saveRecordingAnalysisIfCurrent(id: String, range: HistoryRange?, includeUndated: Boolean,
+                                      fingerprint: String, profileKey: String, raw: String,
+                                      canWrite: () -> Boolean = { true }): Boolean = synchronized(WRITE_LOCK) {
+        if (recording(id) == null || profileForRecording(id)?.cacheKey.orEmpty() != profileKey ||
+            AnalysisFingerprint.messages(recordingMessages(id, range, includeUndated)) != fingerprint) return@synchronized false
+        if (!canWrite()) return@synchronized false
+        saveRecordingAnalysis(id, raw)
+        true
+    }
+
+    fun profiles(): List<ConversationProfile> = synchronized(WRITE_LOCK) {
+        readableDatabase.query("conversation_profiles", null, null, null, null, null, "created_at DESC, id").use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    fun str(name: String) = c.getColumnIndexOrThrow(name).let { if (c.isNull(it)) null else c.getString(it) }
+                    add(ConversationProfile(str("id")!!, str("name")!!, AnalysisScene.read(str("scene")),
+                        runCatching { ProfileKind.valueOf(str("kind")!!) }.getOrDefault(ProfileKind.UNKNOWN),
+                        c.getLong(c.getColumnIndexOrThrow("created_at")), c.getLong(c.getColumnIndexOrThrow("revision")),
+                        str("analysis"), str("analysis_fingerprint")))
+                }
+            }
+        }
+    }
+
+    fun profile(id: String): ConversationProfile? = profiles().firstOrNull { it.id == id }
+    fun profileForRecording(recordingId: String): ConversationProfile? = synchronized(WRITE_LOCK) {
+        readableDatabase.query("profile_recordings", arrayOf("profile_id"), "recording_id=?", arrayOf(recordingId), null, null, null).use {
+            if (it.moveToFirst()) profile(it.getString(0)) else null
+        }
+    }
+
+    fun createProfile(profile: ConversationProfile, recordingId: String? = null) = synchronized(WRITE_LOCK) {
+        require(profile.id.isNotBlank() && profile.name.isNotBlank() && profile.name.length <= 80)
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.insertOrThrow("conversation_profiles", null, ContentValues().apply {
+                put("id", profile.id); put("name", profile.name); put("scene", profile.scene.name)
+                put("kind", profile.kind.name); put("created_at", profile.createdAt); put("revision", 0)
+            })
+            if (recordingId != null) linkRecording(profile.id, recordingId)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    fun updateProfile(id: String, name: String, scene: AnalysisScene, kind: ProfileKind) = synchronized(WRITE_LOCK) {
+        require(name.isNotBlank() && name.length <= 80)
+        check(writableDatabase.update("conversation_profiles", ContentValues().apply {
+            put("name", name); put("scene", scene.name); put("kind", kind.name)
+        }, "id=?", arrayOf(id)) == 1)
+        writableDatabase.execSQL("UPDATE conversation_profiles SET revision=revision+1 WHERE id=?", arrayOf(id))
+    }
+
+    fun linkRecording(profileId: String, recordingId: String) = synchronized(WRITE_LOCK) {
+        require(profile(profileId) != null && recording(recordingId) != null)
+        val previous = profileForRecording(recordingId)
+        if (previous?.id == profileId) return@synchronized
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            invalidateProfile(db, recordingId)
+            db.insertWithOnConflict("profile_recordings", null, ContentValues().apply {
+                put("recording_id", recordingId); put("profile_id", profileId)
+            }, SQLiteDatabase.CONFLICT_REPLACE)
+            invalidateProfile(db, recordingId)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    fun unlinkRecording(profileId: String, recordingId: String) = synchronized(WRITE_LOCK) {
+        if (profileForRecording(recordingId)?.id != profileId) return@synchronized
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            invalidateProfile(db, recordingId)
+            db.delete("profile_recordings", "profile_id=? AND recording_id=?", arrayOf(profileId, recordingId))
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    fun profileSnapshot(id: String): ProfileSnapshot? = synchronized(WRITE_LOCK) {
+        val profile = profile(id) ?: return@synchronized null
+        val ids = readableDatabase.query("profile_recordings", arrayOf("recording_id"), "profile_id=?", arrayOf(id), null, null, "recording_id").use { c ->
+            buildList { while (c.moveToNext()) add(c.getString(0)) }
+        }
+        val records = ids.mapNotNull(::recording)
+        ProfileSnapshot(profile, records, records.flatMap { recordingMessages(it.id) }.sortedBy { it.id })
+    }
+
+    /** Compare source contents as well as revision, so stale or deleted sources never receive a report. */
+    fun saveProfileAnalysis(id: String, fingerprint: String, report: RelationshipReport, cloud: Boolean = false,
+                            canWrite: () -> Boolean = { true }): Boolean = synchronized(WRITE_LOCK) {
+        val current = profileSnapshot(id) ?: return@synchronized false
+        if (current.fingerprint != fingerprint) return@synchronized false
+        val local = if (cloud) current.freshLocalReport ?: return@synchronized false else report
+        val envelope = JSONObject().put("version", ContextInsight.VERSION).put("localReport", JSONObject(local.toJson()))
+            .put("cloudReport", if (cloud) JSONObject(report.toJson()) else JSONObject.NULL)
+            .put("analyzedAt", System.currentTimeMillis()).put("sourceMessageCount", current.messages.size)
+        if (!canWrite()) return@synchronized false
+        writableDatabase.update("conversation_profiles", ContentValues().apply {
+            put("analysis", envelope.toString()); put("analysis_fingerprint", fingerprint)
+        }, "id=?", arrayOf(id)) == 1
+    }
+
+    fun deleteProfile(id: String) = synchronized(WRITE_LOCK) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete("profile_recordings", "profile_id=?", arrayOf(id))
+            db.delete("conversation_profiles", "id=?", arrayOf(id))
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
     fun interruptRecordings() = synchronized(WRITE_LOCK) {
         writableDatabase.update("recordings", ContentValues().apply {
             put("state", RecordingState.PAUSED.name); put("reason", "服务已断开，请回到目标微信会话后确认继续")
@@ -230,6 +363,8 @@ class MessageArchive(context: Context) : SQLiteOpenHelper(context.applicationCon
         val db = writableDatabase
         db.beginTransaction()
         try {
+            invalidateProfile(db, id)
+            db.delete("profile_recordings", "recording_id=?", arrayOf(id))
             db.delete("messages", "stream=?", arrayOf(id)); db.delete("screen_checkpoints", "stream=?", arrayOf(id))
             db.delete("recordings", "id=?", arrayOf(id)); db.setTransactionSuccessful()
         } finally { db.endTransaction() }
@@ -243,6 +378,8 @@ class MessageArchive(context: Context) : SQLiteOpenHelper(context.applicationCon
             db.delete("messages", null, null)
             db.delete("screen_checkpoints", null, null)
             db.delete("recordings", null, null)
+            db.delete("profile_recordings", null, null)
+            db.delete("conversation_profiles", null, null)
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
         screens.clear(); screenEpoch = EPOCH.incrementAndGet()

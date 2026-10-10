@@ -9,22 +9,24 @@
 <p align="center">An Android attention assistant for visible WeChat conversations. Local-first, explainable, and always under your control.</p>
 
 <p align="center">
-  <a href="https://github.com/sssssjw11/attention-guard/releases/tag/v1.25"><img alt="1.25 预览版" src="https://img.shields.io/badge/version-1.25_preview-136B5A"></a>
+  <a href="docs/releases/v1.26.1.md"><img alt="1.26.1 预览版" src="https://img.shields.io/badge/version-1.26.1_preview-136B5A"></a>
   <img alt="Android 11 及以上" src="https://img.shields.io/badge/Android-11%2B-3DDC84?logo=android&logoColor=white">
   <img alt="Kotlin 原生应用" src="https://img.shields.io/badge/Kotlin-native-7F52FF?logo=kotlin&logoColor=white">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-315DA8"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/sssssjw11/attention-guard/releases/download/v1.25/touxian-1.25-debug.apk"><strong>下载 APK</strong></a> ·
+  <a href="https://github.com/sssssjw11/attention-guard/releases/download/v1.25/touxian-1.25-debug.apk"><strong>已公开的 1.25 APK</strong></a> ·
   <a href="#quick-start">快速开始</a> ·
   <a href="#features">功能介绍</a> ·
-  <a href="docs/releases/v1.25.md">更新与 Debug 记录</a> ·
+  <a href="docs/releases/v1.26.1.md">1.26.1 更新与升级说明</a> ·
   <a href="https://github.com/sssssjw11/attention-guard/issues">反馈问题</a>
 </p>
 
 > [!IMPORTANT]
-> 当前为 **1.25 预览版 / versionCode 26**，安装包使用 **debug 签名**，不是已完成全面验收的稳定版。只支持微信；群名空节点 OCR 的实际恢复、复杂语义和跨机型表现仍有待验证。请核对原始消息，不把规则评分当作事实或真实情绪概率。
+> 当前源码为 **1.26.1 预览版 / versionCode 29**，基于 **1.25.2 / 71c2342**，交付 APK 使用 **debug 签名**。431 项测试及原生界面渲染通过；真机覆盖安装与实际 DeepSeek 语境效果待验收，历史公开下载仍为 1.25。请核对原始消息，不把规则评分当作事实或真实情绪概率。
+
+**1.26.1 完善语境理解与档案使用流程。** 微信悬浮卡和自由分析支持通用、朋友、工作、亲密四种场景；本地先显示当前表达、可能诉求和可复制回复，点击「深入理解」预览发送原文后调用 DeepSeek。首页可进入对象档案，按名称或记录查找，查看新增消息、上次更新和待更新状态；从会话关联档案后返回继续分析。报告支持栏目筛选，引用可展开同一录制的前后文；画像更新以关联原文为依据。完整使用、数据库升级与验证边界见 [1.26.1 实施说明](docs/iteration-1.26.1.md) 和 [界面改进前后对照](docs/design/1.26.1/review.md)。
 
 **1.25 合并 1.23–1.25 的迭代。** 在会话记录、深度分析和诊断基础上，修复标题绑定与滑动后的群名恢复，新增自定义消息关键词、事件类型和重要性规则。完整变更、根因与验证边界见 [1.25 更新与 Debug 记录](docs/releases/v1.25.md)。
 

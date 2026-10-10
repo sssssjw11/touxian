@@ -189,6 +189,106 @@ class ChatCaptureServiceTest {
         tick(10)
         assertEquals(2, service.titleReads.size)
     }
+    private fun labels() = windows.views.asSequence().flatMap { children(it) }
+        .filterIsInstance<android.widget.TextView>().map { it.text.toString() }.toList()
+    @Test fun anOutOfScopeOcrTitleIsReusedForTheSameChatInsteadOfBlinking() {
+        Prefs(context).whitelist = setOf("Building group")
+        Prefs(context).localOcrEnabled = true
+        service.fakeTitleReader = true
+        service.activeRoot = root(title = "", message = "请大家明天提交课程作业并在群里确认")
+        service.connect(); tick()
+        service.titleReads.single().second("Outside group(225)", "ok"); drain()
+        repeat(4) {
+            tick(12)
+            assertTrue(labels().any { it.contains("Outside group(225)") })
+            assertFalse(labels().any { it.contains("会话名称未确认") })
+        }
+        // Scrolling the same out-of-scope chat keeps the label without a new screenshot.
+        service.activeRoot = root(title = "", message = "滚动之后看到的另一段完全不同的内容")
+        tick()
+        assertTrue(labels().any { it.contains("Outside group(225)") })
+        assertEquals(1, service.titleReads.size)
+        MessageArchive(context).use { assertEquals(0, it.count().total) }
+        // Adding the chat to the scope re-reads instead of trusting the display-only title.
+        Prefs(context).whitelist = setOf("Building group", "Outside group")
+        tick()
+        assertEquals(2, service.titleReads.size)
+    }
+    @Test fun scrollingDefersTheTitleScreenshotUntilTheListSettles() {
+        Prefs(context).whitelist = setOf("Building group")
+        Prefs(context).localOcrEnabled = true
+        service.fakeTitleReader = true
+        service.activeRoot = root(title = "", message = "第一屏的课程通知内容")
+        service.connect(); tick()
+        service.titleReads.single().second(null, "标题未能自动识别"); drain()
+        val scrolled = AccessibilityEvent.obtain(AccessibilityEvent.TYPE_VIEW_SCROLLED).apply { packageName = "com.tencent.mm" }
+        for (i in 1..6) {
+            service.activeRoot = root(title = "", message = "滚动中的第${i}屏课程通知内容")
+            service.onAccessibilityEvent(scrolled); advance(300)
+        }
+        assertEquals(1, service.titleReads.size)
+        advance(1000)
+        assertEquals(2, service.titleReads.size)
+    }
+    @Test fun scrollingAConfirmedChatKeepsItsNameAndSavesOnlyAfterVerification() {
+        Prefs(context).whitelist = setOf("Building group")
+        Prefs(context).localOcrEnabled = true
+        service.fakeTitleReader = true
+        service.activeRoot = root(title = "", message = "请大家明天提交作业")
+        service.connect(); tick()
+        service.titleReads.single().second("Building group(457)", "ok"); drain()
+        val mounted = windows.views.single()
+        // No overlap with the first screen, no navigation: still the same chat.
+        service.activeRoot = root(title = "", message = "后天上午十点到会议室参加会议")
+        tick()
+        assertSame(mounted, windows.views.single())
+        assertTrue(labels().any { it.contains("Building group(457)") })
+        assertFalse(labels().any { it.contains("会话名称未确认") })
+        MessageArchive(context).use { assertEquals(1, it.count().total) }
+        assertEquals(2, service.titleReads.size)
+        service.titleReads[1].second("Building group(457)", "ok"); drain()
+        MessageArchive(context).use { assertEquals(2, it.count().total) }
+    }
+    @Test fun navigationBreaksScrollContinuitySoAnUnnamedNextChatIsNotRelabelled() {
+        Prefs(context).whitelist = setOf("Building group")
+        Prefs(context).localOcrEnabled = true
+        service.fakeTitleReader = true
+        service.activeRoot = root(title = "", message = "请大家明天提交作业")
+        service.connect(); tick()
+        service.titleReads.single().second("Building group(457)", "ok"); drain()
+        service.onAccessibilityEvent(AccessibilityEvent.obtain(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED).apply { packageName = "com.tencent.mm" })
+        service.activeRoot = root(title = "", message = "另一个会话里完全不同的通知内容")
+        tick()
+        assertFalse(labels().any { it.contains("Building group") })
+        assertTrue(labels().any { it.contains("会话名称未确认") })
+        MessageArchive(context).use { assertEquals(1, it.count().total) }
+    }
+    @Test fun aBackgroundReadNamingAnotherChatReleasesTheContinuedBinding() {
+        Prefs(context).whitelist = setOf("Building group")
+        Prefs(context).localOcrEnabled = true
+        service.fakeTitleReader = true
+        service.activeRoot = root(title = "", message = "请大家明天提交作业")
+        service.connect(); tick()
+        service.titleReads.single().second("Building group(457)", "ok"); drain()
+        service.activeRoot = root(title = "", message = "另一个会话里完全不同的通知内容")
+        tick()
+        service.titleReads[1].second("Outside group", "ok"); drain()
+        tick()
+        assertFalse(labels().any { it.contains("Building group") })
+        assertTrue(labels().any { it.contains("Outside group") })
+        MessageArchive(context).use { assertEquals(1, it.count().total) }
+    }
+    @Test fun recoveringTheTitleUpdatesTheMountedCardInsteadOfRemountingIt() {
+        Prefs(context).whitelist = setOf("Building group")
+        Prefs(context).localOcrEnabled = true
+        service.fakeTitleReader = true
+        service.activeRoot = root(title = "", message = "请大家明天提交作业")
+        service.connect(); tick()
+        val mounted = windows.views.single()
+        service.titleReads.single().second("Building group(457)", "ok"); drain()
+        assertSame(mounted, windows.views.single())
+        assertTrue(labels().any { it.contains("Building group(457)") })
+    }
     @Test fun navigatingWithIdenticalBubblesCancelsTheOldTitleRequest() {
         Prefs(context).whitelist = setOf("Building group")
         Prefs(context).localOcrEnabled = true
@@ -259,6 +359,24 @@ class ChatCaptureServiceTest {
         tick()
         assertTrue(windows.views.asSequence().flatMap { children(it) }.filterIsInstance<android.widget.TextView>()
             .any { it.text.toString().contains("事件类型") })
+    }
+    @Test fun aNewEventScreenInTheSameChatNeverPassesThroughTheIdleCard() {
+        Prefs(context).overlaySize = com.attentionguard.app.core.OverlaySize.EXPANDED
+        service.activeRoot = root(message = "学分数据尚未导入，大家莫急")
+        service.connect(); tick()
+        val mounted = windows.views.single()
+        assertTrue(labels().any { it.contains("事件类型") })
+        // Hold storage so the new screen is accepted but its event is not saved yet.
+        val gate = CountDownLatch(1)
+        (ChatCaptureService::class.java.getDeclaredField("storageWorker").apply { isAccessible = true }
+            .get(service) as ExecutorService).execute { gate.await(3, TimeUnit.SECONDS) }
+        service.activeRoot = root(message = "请大家明天下午五点前提交课程作业")
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1600))
+        assertTrue(labels().any { it.contains("事件类型") })
+        assertFalse(labels().any { it.contains("可见消息") })
+        gate.countDown(); drain()
+        assertSame(mounted, windows.views.single())
+        assertTrue(labels().any { it.contains("事件类型") })
     }
     @Test fun intentModeUsesCurrentWeChatEvenWhenAutoAnalysisIsOff() {
         Prefs(context).autoAnalyze = false

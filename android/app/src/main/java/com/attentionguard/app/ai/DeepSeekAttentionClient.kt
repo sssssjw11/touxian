@@ -90,7 +90,8 @@ class DeepSeekAttentionClient internal constructor(
 
     private fun clean(value: String): String = value.trim().takeUnless { it == "null" }.orEmpty()
 
-    internal fun postJson(system: String, user: String, maxTokens: Int = 700, validateEvent: Boolean = true): JSONObject {
+    internal fun postJson(system: String, user: String, maxTokens: Int = 700, validateEvent: Boolean = true,
+                          readTimeoutMs: Int = 22000): JSONObject {
         val messages = JSONArray()
             .put(JSONObject().put("role", "system").put("content", system))
             .put(JSONObject().put("role", "user").put("content", user))
@@ -107,7 +108,7 @@ class DeepSeekAttentionClient internal constructor(
             connection = openConnection().apply {
                 requestMethod = "POST"
                 connectTimeout = 12000
-                readTimeout = 22000
+                readTimeout = readTimeoutMs
                 doOutput = true
                 instanceFollowRedirects = false
                 setRequestProperty("Authorization", "Bearer $key")

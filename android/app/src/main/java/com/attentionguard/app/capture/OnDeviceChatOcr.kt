@@ -19,7 +19,11 @@ import java.text.Normalizer
 import kotlin.math.abs
 
 /** Opt-in, local-only fallback restricted to proven, visible text-bubble rectangles. */
-class OnDeviceChatOcr(private val service: AccessibilityService, private val hideOverlay: (Boolean) -> Unit) {
+class OnDeviceChatOcr(
+    private val service: AccessibilityService,
+    private val overlayCovers: (Rect) -> Boolean = { true },
+    private val hideOverlay: (Boolean) -> Unit
+) {
     private val main = Handler(Looper.getMainLooper())
     private var recognizer: TextRecognizer? = null
     private var busy = false
@@ -109,7 +113,9 @@ class OnDeviceChatOcr(private val service: AccessibilityService, private val hid
             done(if (current) title else null, if (current) reason else "会话已变化")
         }
         main.postDelayed({ complete(null, "标题识别超时") }, 12_000)
-        hideOverlay(true)
+        // The card normally sits below the ActionBar; hiding it anyway makes
+        // every title read visible as a blink.
+        if (requestedBounds == null || overlayCovers(requestedBounds)) hideOverlay(true)
         main.postDelayed({
             if (request != generation) return@postDelayed
             if (!stillCurrent()) { complete(null, "会话已变化"); return@postDelayed }

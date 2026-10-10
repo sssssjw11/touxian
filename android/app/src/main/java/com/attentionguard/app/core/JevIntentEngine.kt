@@ -119,6 +119,14 @@ object JevIntentEngine {
 
     /** Free text is user-supplied and is never represented as a captured WeChat snapshot. */
     fun analyzeCustom(input: String): IntentInsight? {
+        val turns = customMessages(input).map { Turn(it.side, it.text, it.sender) }
+        val latest = turns.lastOrNull { it.side == "other" && it.text.isNotBlank() } ?: return null
+        val latestIndex = turns.indexOfLast { it.side == "other" && it.text.isNotBlank() }
+        return classify(latest.text, "对方", "", System.currentTimeMillis(), "手动输入 · 本地规则",
+            turns.take(latestIndex), turns.drop(latestIndex + 1))
+    }
+
+    fun customMessages(input: String): List<Msg> {
         val turns = mutableListOf<Turn>()
         input.takeLast(12_000).lineSequence().forEach { raw ->
             val line = raw.trim()
@@ -130,10 +138,7 @@ object JevIntentEngine {
             } else if (turns.isEmpty()) turns += Turn("other", line)
             else turns[turns.lastIndex] = turns.last().let { it.copy(text = listOf(it.text, line).filter(String::isNotBlank).joinToString("\n")) }
         }
-        val latest = turns.lastOrNull { it.side == "other" && it.text.isNotBlank() } ?: return null
-        val latestIndex = turns.indexOfLast { it.side == "other" && it.text.isNotBlank() }
-        return classify(latest.text, "对方", "", System.currentTimeMillis(), "手动输入 · 本地规则",
-            turns.take(latestIndex), turns.drop(latestIndex + 1))
+        return turns.filter { it.text.isNotBlank() }.map { Msg(it.side, it.text) }
     }
 
     private fun classify(text: String, sender: String, group: String, capturedAt: Long, sourceLabel: String,

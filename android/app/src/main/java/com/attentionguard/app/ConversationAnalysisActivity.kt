@@ -12,6 +12,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.widget.SwitchCompat
 import com.attentionguard.app.ai.DeepSeekRelationshipClient
 import com.attentionguard.app.capture.CaptureRuntime
@@ -23,6 +24,12 @@ import com.attentionguard.app.core.Prefs
 import com.attentionguard.app.core.RecordingState
 import com.attentionguard.app.core.RelationshipAnalysis
 import com.attentionguard.app.core.RelationshipReport
+import com.attentionguard.app.core.AnalysisScene
+import com.attentionguard.app.core.AnalysisFingerprint
+import com.attentionguard.app.core.AnalysisInput
+import com.attentionguard.app.core.ContextInsight
+import com.attentionguard.app.core.ConversationProfile
+import com.attentionguard.app.ui.AnalysisViews
 import com.attentionguard.app.ui.GuardMotion
 import com.attentionguard.app.ui.GuardSegments
 import com.attentionguard.app.ui.GuardUi
@@ -55,6 +62,9 @@ class ConversationAnalysisActivity : AppCompatActivity() {
     private lateinit var includeUnknown: SwitchCompat
     private lateinit var analyzeButton: MaterialButton
     private lateinit var cloudButton: MaterialButton
+    private lateinit var sceneButton: MaterialButton
+    private lateinit var profileButton: MaterialButton
+    private lateinit var cancelButton: MaterialButton
     private lateinit var result: LinearLayout
     private lateinit var messages: LinearLayout
     private lateinit var moreButton: MaterialButton
@@ -72,6 +82,9 @@ class ConversationAnalysisActivity : AppCompatActivity() {
     private var localReport: RelationshipReport? = null
     private var cloudReport: RelationshipReport? = null
     private var cloudAvailable = false
+    private var selectedScene = AnalysisScene.GENERAL
+    private var sceneExplicit = false
+    private var linkedProfile: ConversationProfile? = null
     private var busy = false
     private var syncing = false
     @Volatile private var closed = false
@@ -79,6 +92,9 @@ class ConversationAnalysisActivity : AppCompatActivity() {
     private val generation = AtomicInteger()
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
+    private val associateProfile = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK) { sceneExplicit = false; load() }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -91,6 +107,8 @@ class ConversationAnalysisActivity : AppCompatActivity() {
         end = parseDay(savedInstanceState?.getString("end")) ?: end
         includeUndated = savedInstanceState?.getBoolean("include_undated", rangeMode == R.id.ag_conversation_all)
             ?: (rangeMode == R.id.ag_conversation_all)
+        selectedScene = AnalysisScene.read(savedInstanceState?.getString("analysis_scene"))
+        sceneExplicit = savedInstanceState?.getBoolean("scene_explicit") ?: false
         val root = FrameLayout(this).apply { setBackgroundColor(ui.background) }
         val shell = ui.boundedColumn()
         root.addView(shell, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER_HORIZONTAL))
@@ -179,6 +197,19 @@ class ConversationAnalysisActivity : AppCompatActivity() {
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
         addView(quality)
+        sceneButton = ui.button("分析场景 · 通用", R.drawable.ag_settings_2, false) {
+            MaterialAlertDialogBuilder(this@ConversationAnalysisActivity).setTitle("本次分析场景")
+                .setSingleChoiceItems(AnalysisScene.entries.map { it.label }.toTypedArray(), selectedScene.ordinal) { dialog, index ->
+                    selectedScene = AnalysisScene.entries[index]; sceneExplicit = true
+                    dialog.dismiss(); load()
+                }.setNegativeButton("取消", null).show()
+        }.apply { id = R.id.ag_conversation_scene; layoutParams = ui.lp(12) }
+        addView(sceneButton)
+        profileButton = ui.button("关联对象档案", R.drawable.ag_bookmark_plus, false) {
+            selectedId?.let { id -> associateProfile.launch(Intent(this@ConversationAnalysisActivity, ObjectProfilesActivity::class.java)
+                .putExtra(ObjectProfilesActivity.EXTRA_RECORDING_ID, id).putExtra(ObjectProfilesActivity.EXTRA_RETURN_RESULT, true)) }
+        }.apply { id = R.id.ag_conversation_profile; layoutParams = ui.lp(8) }
+        addView(profileButton)
         analyzeButton = ui.button("深度分析", R.drawable.ag_scan_text) { analyze(false) }.apply {
             id = R.id.ag_conversation_analyze
             layoutParams = ui.lp(16)
@@ -189,6 +220,11 @@ class ConversationAnalysisActivity : AppCompatActivity() {
             layoutParams = ui.lp(8)
         }
         addView(cloudButton)
+        cancelButton = ui.button("取消深化", R.drawable.ag_x, false) {
+            generation.incrementAndGet(); cloudClient?.cancel(); cloudClient = null
+            setBusy(false); load()
+        }.apply { id = R.id.ag_conversation_cancel; layoutParams = ui.lp(8); visibility = View.GONE }
+        addView(cancelButton)
         result = ui.column().apply {
             id = R.id.ag_conversation_result
             layoutParams = ui.lp(16)
@@ -301,12 +337,15 @@ class ConversationAnalysisActivity : AppCompatActivity() {
                         val content = archive.recordingMessages(id, range, unknown)
                         val count = archive.count(id)
                         val raw = archive.recordingAnalysis(id)
-                        val saved = readReports(raw, range, unknown, content)
+                        val profile = archive.profileForRecording(id)
+                        val scene = if (sceneExplicit) selectedScene else profile?.scene ?: AnalysisScene.GENERAL
+                        val saved = readReports(raw, range, unknown, content, scene, profile?.cacheKey.orEmpty())
                         val prefs = Prefs(this)
                         val cloudReady = prefs.cloudEnabled && prefs.hasKey()
                         post(request) {
                             selected = recording
                             selectedMessages = content
+                            linkedProfile = profile; selectedScene = scene
                             localReport = saved.first
                             cloudReport = saved.second
                             cloudAvailable = cloudReady
@@ -331,6 +370,9 @@ class ConversationAnalysisActivity : AppCompatActivity() {
     private fun renderRecordings(records: List<Pair<ChatRecording, Int>>) {
         list.removeAllViews()
         list.addView(ui.text("会话记录", R.dimen.ag_type_title, bold = true))
+        list.addView(ui.button("对象档案", R.drawable.ag_bookmark_plus, false) {
+            startActivity(Intent(this, ObjectProfilesActivity::class.java))
+        }.apply { layoutParams = ui.lp(12) })
         if (records.isEmpty()) {
             list.addView(ui.text("暂无会话记录", tint = ui.sub).apply { layoutParams = ui.lp(24) })
             list.addView(ui.button("打开微信", R.drawable.ag_arrow_up_right, false) { openWeChat() }.apply { layoutParams = ui.lp(12) })
@@ -352,6 +394,7 @@ class ConversationAnalysisActivity : AppCompatActivity() {
             }
             ui.accessibleAction(entry, recording.title + "，" + recording.state.label + "，$count 条已保存") {
                 selectedId = recording.id
+                sceneExplicit = false
                 rangeMode = R.id.ag_conversation_all
                 includeUndated = true
                 updateRangeControls()
@@ -365,6 +408,8 @@ class ConversationAnalysisActivity : AppCompatActivity() {
 
     private fun renderDetail(recording: ChatRecording, total: Int, undated: Int, range: HistoryRange?) {
         titleText.text = recording.title
+        sceneButton.text = "分析场景 · ${selectedScene.label}"
+        profileButton.text = linkedProfile?.let { "对象档案 · ${it.name}（更改关联）" } ?: "关联对象档案"
         status.text = recording.state.label + " · $total 条已保存\n采集时间 · " + acquisitionRange(recording) +
             recording.reason.takeIf { it.isNotBlank() }?.let { "\n$it" }.orEmpty()
         val scope = range?.toString() ?: "全部已保存消息"
@@ -388,7 +433,8 @@ class ConversationAnalysisActivity : AppCompatActivity() {
         cloudButton.isEnabled = !value && available && cloudAvailable
         cloudButton.contentDescription = if (cloudButton.isEnabled) "DeepSeek 深化，将全量统计与最多 90 条关键语境发送至 DeepSeek"
             else "DeepSeek 深化不可用，需有已保存消息并在设置中启用和配置 DeepSeek"
-        listOf<View>(ranges, startButton, endButton, includeUnknown, resumeButton, stopButton, deleteButton,
+        cancelButton.visibility = if (value && selected != null) View.VISIBLE else View.GONE
+        listOf<View>(ranges, startButton, endButton, includeUnknown, resumeButton, stopButton, deleteButton, sceneButton, profileButton,
             findViewById(R.id.ag_conversation_refresh)).forEach { it.isEnabled = !value }
         for (i in 0 until ranges.childCount) ranges.getChildAt(i).isEnabled = !value
         deleteButton.isEnabled = !value && selected != null
@@ -418,13 +464,26 @@ class ConversationAnalysisActivity : AppCompatActivity() {
 
     private fun confirmCloud() {
         if (!cloudButton.isEnabled) return
-        MaterialAlertDialogBuilder(this).setTitle("发送选定内容进行深化？")
-            .setMessage("将选定范围的全量统计与关键语境（最多 90 条消息）发送至 DeepSeek 进行分析。\n\n会话：" + selected?.title +
-                "\n范围：" + (currentRange()?.toString() ?: "全部已保存消息") +
-                "\n本地统计范围：" + selectedMessages.size + " 条\n本地分析结果会保留。")
-            .setNegativeButton("取消", null)
-            .setPositiveButton("发送并分析") { _, _ -> analyze(true) }
-            .show()
+        val recording = selected ?: return
+        val content = selectedMessages.toList()
+        val profile = linkedProfile
+        val scene = selectedScene
+        val request = generation.incrementAndGet()
+        setBusy(true); status.text = "正在准备发送范围…"
+        worker.execute {
+            runCatching {
+                val base = RelationshipAnalysis.analyze(content, recording.title, scene, profile)
+                val input = AnalysisInput.deep(content, base, profile)
+                post(request) {
+                    setBusy(false)
+                    if (input.messages.isEmpty()) { status.text = "没有可发送的原文，请先核对自动识别的文字，或使用自由分析"; return@post }
+                    AnalysisViews.confirmInput(this, input, recording.title + " · " +
+                        (currentRange()?.toString() ?: "全部已保存消息")) {
+                        if (valid(request)) analyze(true)
+                    }
+                }
+            }.onFailure { post(request) { setBusy(false); status.text = "发送范围读取失败，请刷新重试" } }
+        }
     }
 
     private fun analyze(cloud: Boolean) {
@@ -433,7 +492,15 @@ class ConversationAnalysisActivity : AppCompatActivity() {
         val range = currentRange()
         val unknown = includeUndated
         val content = selectedMessages.toList()
+        val scene = selectedScene
+        val profile = linkedProfile
+        val contentKey = AnalysisFingerprint.messages(content)
         val request = generation.incrementAndGet()
+        fun save(local: RelationshipReport, enhanced: RelationshipReport?) {
+            check(archive.saveRecordingAnalysisIfCurrent(recording.id, range, unknown, contentKey,
+                profile?.cacheKey.orEmpty(), encodeReports(range, unknown, content, local, enhanced, profile?.cacheKey.orEmpty()),
+                canWrite = { valid(request) })) { "stale" }
+        }
         setBusy(true)
         status.text = if (cloud) "正在深化分析…" else "正在分析已保存语境…"
         val oldCloud = cloudReport
@@ -450,20 +517,20 @@ class ConversationAnalysisActivity : AppCompatActivity() {
                     }
                     return@execute
                 }
-                base = RelationshipAnalysis.analyze(content, recording.title)
+                base = RelationshipAnalysis.analyze(content, recording.title, scene, profile)
                 if (!valid(request)) return@execute
-                archive.saveRecordingAnalysis(recording.id, encodeReports(range, unknown, content, requireNotNull(base), null))
+                save(requireNotNull(base), null)
                 if (cloud) {
                     // Persist the local report before the network call; network failure never replaces it.
                     post(request) { localReport = base; cloudReport = null; renderReports() }
                     val client = DeepSeekRelationshipClient(prefs.activeKey(), prefs.activeModel())
                     cloudClient = client
                     if (!valid(request)) { client.cancel(); return@execute }
-                    val enhanced = try { client.analyze(content, requireNotNull(base)) } finally {
+                    val enhanced = try { client.analyze(content, requireNotNull(base), profile) } finally {
                         if (cloudClient === client) cloudClient = null
                     }
                     if (!valid(request)) return@execute
-                    archive.saveRecordingAnalysis(recording.id, encodeReports(range, unknown, content, requireNotNull(base), enhanced))
+                    save(requireNotNull(base), enhanced)
                     post(request) {
                         localReport = base
                         cloudReport = enhanced
@@ -497,6 +564,10 @@ class ConversationAnalysisActivity : AppCompatActivity() {
 
     private fun renderReports() {
         result.removeAllViews()
+        if (localReport?.analysisVersion?.let { it < ContextInsight.VERSION } == true) {
+            result.addView(ui.text("这是旧版分析，仍可回顾原文；点击「深度分析」可更新到当前分析方式。",
+                R.dimen.ag_type_caption, ui.sub).apply { layoutParams = ui.lp(8) })
+        }
         localReport?.let { renderReport(it, "本地分析") }
         cloudReport?.let {
             result.addView(ui.divider(20))
@@ -513,10 +584,17 @@ class ConversationAnalysisActivity : AppCompatActivity() {
         result.addView(ui.text(report.label, R.dimen.ag_type_heading, bold = true).apply { layoutParams = ui.lp(12) })
         result.addView(ui.text(report.summary).apply { layoutParams = ui.lp(8) })
         result.addView(ui.confidence("判断置信度", report.confidence).apply { layoutParams = ui.lp(12) })
-        report.metrics.forEach { metric ->
-            result.addView(ui.statusRow(metric.label, metric.value.toString(), ui.brand).apply { layoutParams = ui.lp(8) })
-            if (metric.detail.isNotBlank()) result.addView(ui.text(metric.detail, R.dimen.ag_type_caption, ui.sub).apply { layoutParams = ui.lp(5) })
+        report.context?.let { context ->
+            AnalysisViews.append(result, context, selectedMessages.associate { "archive:${it.id}" to it.message.text },
+                selectedMessages.map(AnalysisInput::archived), selected?.let { mapOf(it.id to it.title) }.orEmpty())
+            AnalysisViews.metrics(result, report.metrics)
+            if (context.replies.isEmpty() && report.suggestions.isNotEmpty()) {
+                result.addView(ui.heading("下一步"))
+                result.addView(ui.text(report.suggestions.joinToString("\n")).apply { layoutParams = ui.lp(8) })
+            }
+            return
         }
+        AnalysisViews.metrics(result, report.metrics)
         report.findings.forEach { finding ->
             result.addView(ui.text(finding.label, bold = true).apply { layoutParams = ui.lp(18) })
             result.addView(ui.text(finding.detail, R.dimen.ag_type_label, ui.sub).apply { layoutParams = ui.lp(6) })
@@ -606,7 +684,14 @@ class ConversationAnalysisActivity : AppCompatActivity() {
         outState.putString("start", start.toString())
         outState.putString("end", end.toString())
         outState.putBoolean("include_undated", includeUndated)
+        outState.putString("analysis_scene", selectedScene.name)
+        outState.putBoolean("scene_explicit", sceneExplicit)
         super.onSaveInstanceState(outState)
+    }
+
+    override fun onStop() {
+        generation.incrementAndGet(); cloudClient?.cancel(); cloudClient = null
+        super.onStop()
     }
 
     override fun onDestroy() {
@@ -633,8 +718,9 @@ class ConversationAnalysisActivity : AppCompatActivity() {
     }
 
     private fun encodeReports(range: HistoryRange?, unknown: Boolean, content: List<ArchivedMessage>,
-                              local: RelationshipReport, cloud: RelationshipReport?): String = JSONObject().apply {
-        put("version", 1)
+                              local: RelationshipReport, cloud: RelationshipReport?, profileKey: String = ""): String = JSONObject().apply {
+        put("version", ContextInsight.VERSION)
+        put("scene", local.scene.name); put("profileKey", profileKey)
         put("range", range?.let { JSONObject().put("start", it.start.toString()).put("end", it.end.toString()) }
             ?: JSONObject.NULL)
         put("includeUndated", unknown)
@@ -644,9 +730,12 @@ class ConversationAnalysisActivity : AppCompatActivity() {
     }.toString()
 
     private fun readReports(raw: String?, range: HistoryRange?, unknown: Boolean,
-                            content: List<ArchivedMessage>): Pair<RelationshipReport?, RelationshipReport?> =
+                            content: List<ArchivedMessage>, scene: AnalysisScene = AnalysisScene.GENERAL,
+                            profileKey: String = ""): Pair<RelationshipReport?, RelationshipReport?> =
         runCatching {
             val stored = JSONObject(raw ?: return null to null)
+            if (stored.optInt("version", 1) > ContextInsight.VERSION ||
+                AnalysisScene.read(stored.optString("scene")) != scene || stored.optString("profileKey") != profileKey) return null to null
             val savedRange = stored.optJSONObject("range")
             val rangeMatches = if (range == null) savedRange == null else
                 savedRange?.optString("start") == range.start.toString() && savedRange?.optString("end") == range.end.toString()

@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/sssssjw11/touxian/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/sssssjw11/touxian?style=social"></a>
   <a href="https://github.com/sssssjw11/touxian/commits/main"><img alt="Latest commit" src="https://img.shields.io/github/last-commit/sssssjw11/touxian"></a>
-  <a href="https://github.com/sssssjw11/touxian/releases/tag/android-v1.25"><img alt="Android version" src="https://img.shields.io/badge/Android-1.25_preview-136B5A"></a>
+  <a href="releases/android-v1.26.md"><img alt="Android version" src="https://img.shields.io/badge/Android-1.26_preview-136B5A"></a>
   <img alt="Android 11+" src="https://img.shields.io/badge/Android-11%2B-3DDC84?logo=android&logoColor=white">
   <img alt="MIT License" src="https://img.shields.io/badge/license-MIT-315DA8">
 </p>
@@ -29,9 +29,9 @@
 > 这是一个**双端发布总仓库**：`desktop/` 是偷闲桌面端，`android/` 是偷闲 Android 端。两端共享产品方向，但各自独立运行、独立保存数据、独立发版。
 
 > [!WARNING]
-> 当前 Android 发布包是 **1.25 预览版 / versionCode 26 / debug 签名**；桌面端当前提供本地 Web 工作台，仓库暂未提供独立的 Windows `.exe` 安装包。重要期限和行动请始终回到原始消息核对。
+> 当前 Android 源码与本地交付包是 **1.26 预览版 / versionCode 28 / debug 签名**；已有公开下载为 1.25。1.26 本次未连接手机，真机验收与真实 DeepSeek 效果待核对。桌面端仍提供本地 Web 工作台。重要期限和行动请回到原文核对。
 
-Android 1.25 同步来源 `attention-guard@8145646`，带来消息正文关键词、单会话记录、关系深度分析、诊断导出与滑动标题恢复。参见 [本次 Release](releases/android-v1.25.md) 和 [完整更新与 Debug 记录](android/docs/releases/v1.25.md)。桌面端本次未改动，两端数据不会自动互通。
+Android 1.26 基于 `attention-guard@71c2342` 的 1.25.2，完整保留滑动绑定与闪烁修复，新增手动深入理解、四种场景、可核对原话的解释和回复、独立对象档案及会话深化联动。见 [1.26 交付与升级](releases/android-v1.26.md) 和 [实施记录](android/docs/iteration-1.26.md)。桌面端本次未改动，两端数据不会自动互通。
 
 ---
 
