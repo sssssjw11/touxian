@@ -7,8 +7,10 @@
 - [安装、升级及校验](../android/docs/releases/v1.26.1.md)
 - [本轮改动与接口说明](../android/docs/iteration-1.26.1.md)
 - [八步流程及前后截图](../android/docs/design/1.26.1/review.md)
-- [APK 校验文件](../android/docs/releases/touxian-1.26.1-debug.apk.sha256)
+- [APK 下载](https://github.com/sssssjw11/touxian/releases/download/android-v1.26.1/touxian-1.26.1-debug.apk)
+- [APK SHA-256 校验文件](https://github.com/sssssjw11/touxian/releases/download/android-v1.26.1/touxian-1.26.1-debug.apk.sha256)
+- [GitHub Release 发布页](https://github.com/sssssjw11/touxian/releases/tag/android-v1.26.1)
 
 41 个测试类共 431 项通过，APK 构建与签名校验通过，使用与先前本地 1.25.2 / 1.26 相同的 debug 证书。SQLite 保持 v4，分析格式升至 v3，旧消息和录制保留，旧会话报告仍可打开。
 
-APK 与 Android 源码包通过本次本地交付提供。未进行真机或真实 DeepSeek 验收；原生渲染截图使用示例聊天。代码提交在已有草稿 PR 中，尚未合并或发布 GitHub Release。
+APK 与 SHA-256 校验文件已发布到 [Android v1.26.1 GitHub Release](https://github.com/sssssjw11/touxian/releases/tag/android-v1.26.1)。未进行真机或真实 DeepSeek 验收；原生渲染截图使用示例聊天。完整 Android 源码已合入 `main`。

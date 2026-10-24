@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/sssssjw11/touxian/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/sssssjw11/touxian?style=social"></a>
   <a href="https://github.com/sssssjw11/touxian/commits/main"><img alt="Latest commit" src="https://img.shields.io/github/last-commit/sssssjw11/touxian"></a>
-  <a href="releases/android-v1.26.md"><img alt="Android version" src="https://img.shields.io/badge/Android-1.26_preview-136B5A"></a>
+  <a href="releases/android-v1.26.1.md"><img alt="Android version" src="https://img.shields.io/badge/Android-1.26.1_preview-136B5A"></a>
   <img alt="Android 11+" src="https://img.shields.io/badge/Android-11%2B-3DDC84?logo=android&logoColor=white">
   <img alt="MIT License" src="https://img.shields.io/badge/license-MIT-315DA8">
 </p>
@@ -29,9 +29,9 @@
 > 这是一个**双端发布总仓库**：`desktop/` 是偷闲桌面端，`android/` 是偷闲 Android 端。两端共享产品方向，但各自独立运行、独立保存数据、独立发版。
 
 > [!WARNING]
-> 当前 Android 源码与本地交付包是 **1.26 预览版 / versionCode 28 / debug 签名**；已有公开下载为 1.25。1.26 本次未连接手机，真机验收与真实 DeepSeek 效果待核对。桌面端仍提供本地 Web 工作台。重要期限和行动请回到原文核对。
+> 当前 Android 发布版为 **1.26.1 预览版 / versionCode 29 / debug 签名**。未连接物理手机，覆盖安装、微信手势与真实 DeepSeek 效果仍待验收。桌面端仍提供本地 Web 工作台。重要期限和行动请回到原文核对。
 
-Android 1.26 基于 `attention-guard@71c2342` 的 1.25.2，完整保留滑动绑定与闪烁修复，新增手动深入理解、四种场景、可核对原话的解释和回复、独立对象档案及会话深化联动。见 [1.26 交付与升级](releases/android-v1.26.md) 和 [实施记录](android/docs/iteration-1.26.md)。桌面端本次未改动，两端数据不会自动互通。
+Android 1.26.1 基于 `attention-guard@71c2342` 的 1.25.2，保留滑动绑定与悬浮窗修复，完善四种场景的实时解释、可核对回复、对象档案和会话分析联动。安装包与 SHA-256 已发布到 [Android v1.26.1 Release](https://github.com/sssssjw11/touxian/releases/tag/android-v1.26.1)；升级细节见 [交付说明](releases/android-v1.26.1.md)。桌面端本次未改动，两端数据不会自动互通。
 
 ---
 
@@ -134,19 +134,19 @@ Android 1.26 基于 `attention-guard@71c2342` 的 1.25.2，完整保留滑动绑
 
 | 下载项 | 地址 |
 | --- | --- |
-| Android APK · 1.25 预览版 | [touxian-1.25-debug.apk](https://github.com/sssssjw11/touxian/releases/download/android-v1.25/touxian-1.25-debug.apk) |
-| SHA-256 校验文件 | [touxian-1.25-debug.apk.sha256](https://github.com/sssssjw11/touxian/releases/download/android-v1.25/touxian-1.25-debug.apk.sha256) |
-| 发布页 | [Android v1.25](https://github.com/sssssjw11/touxian/releases/tag/android-v1.25) |
+| Android APK · 1.26.1 预览版 | [touxian-1.26.1-debug.apk](https://github.com/sssssjw11/touxian/releases/download/android-v1.26.1/touxian-1.26.1-debug.apk) |
+| SHA-256 校验文件 | [touxian-1.26.1-debug.apk.sha256](https://github.com/sssssjw11/touxian/releases/download/android-v1.26.1/touxian-1.26.1-debug.apk.sha256) |
+| 发布页 | [Android v1.26.1](https://github.com/sssssjw11/touxian/releases/tag/android-v1.26.1) |
 
 ADB 安装：
 
 ```bash
-adb install -r touxian-1.25-debug.apk
+adb install -r touxian-1.26.1-debug.apk
 ```
 
 > 当前 APK 使用 debug 签名。遇到“签名不一致”时不要直接卸载旧应用，先确认本地事件、消息、密钥和设置的保留方案。
 
-1.22 升级到 1.25 会将消息库从版本 2 迁移到 3，保留旧消息并补充录制及时间字段；没有旧版降级迁移，不建议运行新版本后直接装回旧版。详情见 [升级提醒](releases/android-v1.25.md#upgrade)。
+从 1.25.2 升级会将消息库从版本 3 迁移到 4，保留消息、录制和旧报告；旧画像需要用户主动更新。不要运行新版本后直接安装旧版。详情见 [1.26.1 升级说明](android/docs/releases/v1.26.1.md)。
 
 ### 方式二：启动桌面端
 
