@@ -138,6 +138,8 @@ Android 1.26.1 基于 `attention-guard@71c2342` 的 1.25.2，保留滑动绑定�
 | SHA-256 校验文件 | [touxian-1.26.1-debug.apk.sha256](https://github.com/sssssjw11/touxian/releases/download/android-v1.26.1/touxian-1.26.1-debug.apk.sha256) |
 | 发布页 | [Android v1.26.1](https://github.com/sssssjw11/touxian/releases/tag/android-v1.26.1) |
 
+> Android 安装包通过 GitHub Releases 分发。GitHub Packages 用于 Maven、npm、NuGet 或容器等依赖包；本项目发布的是 Android 应用 APK，没有需要发布到 Packages 的库包，因此该页留空是正常的。
+
 ADB 安装：
 
 ```bash
